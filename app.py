@@ -1678,6 +1678,100 @@ def render_settings_tab():
 """)
 
 
+# ─── Dashboard Tab ────────────────────────────────────────────────────────────
+@st.cache_data(ttl=30)
+def _quick_signal(symbol: str, interval: str, period: str) -> dict:
+    """Lightweight signal fetch for the dashboard overview."""
+    try:
+        df = fetch_data(symbol, interval, period)
+        if df.empty:
+            return {"direction": "NEUTRAL", "score": 0, "price": None}
+        df = compute_indicators(df)
+        sig = generate_signal(df, symbol)
+        price = float(df.iloc[-1]["Close"])
+        return {"direction": sig["direction"], "score": sig["score"], "price": price}
+    except Exception:
+        return {"direction": "NEUTRAL", "score": 0, "price": None}
+
+def render_dashboard(interval: str, period: str):
+    st.markdown("### Market Overview")
+    st.caption("Live signal status for all markets — refreshes every 30 seconds")
+
+    groups = [
+        {"label": "Nasdaq",  "symbols": ["MNQ=F", "NQ=F"]},
+        {"label": "S&P 500", "symbols": ["MES=F", "ES=F"]},
+        {"label": "Gold",    "symbols": ["GC=F",  "MGC=F"]},
+    ]
+
+    for group in groups:
+        st.markdown(f"**{group['label']}**")
+        cols = st.columns(len(group["symbols"]))
+        for col, symbol in zip(cols, group["symbols"]):
+            sig = _quick_signal(symbol, interval, period)
+            d = sig["direction"]
+            score = sig["score"]
+            price = sig["price"]
+            name = TICK_INFO[symbol]["name"]
+
+            if d == "LONG":
+                bg      = "linear-gradient(135deg,#0d2b1a,#0a1f12)"
+                border  = "rgba(48,209,88,0.5)"
+                color   = "#30d158"
+                icon    = "▲"
+                label   = "LONG"
+            elif d == "SHORT":
+                bg      = "linear-gradient(135deg,#2b0d12,#1f0a0d)"
+                border  = "rgba(255,55,95,0.5)"
+                color   = "#ff375f"
+                icon    = "▼"
+                label   = "SHORT"
+            else:
+                bg      = "#1c1c1e"
+                border  = "rgba(255,255,255,0.1)"
+                color   = "#8e8e93"
+                icon    = "●"
+                label   = "WAITING"
+
+            strength = int(abs(score) / 6.0 * 100)
+            price_str = f"{price:,.2f}" if price else "—"
+
+            with col:
+                st.markdown(f"""
+<div style="background:{bg};border:2px solid {border};border-radius:14px;
+     padding:16px;text-align:center;margin-bottom:12px">
+  <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;
+       color:#8e8e93;text-transform:uppercase;margin-bottom:6px">{name}</div>
+  <div style="font-size:2em;line-height:1;color:{color};margin-bottom:4px">{icon}</div>
+  <div style="font-size:14px;font-weight:800;color:{color};letter-spacing:0.04em">{label}</div>
+  <div style="font-size:12px;color:#8e8e93;margin-top:4px">{price_str}</div>
+  <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:4px;margin-top:10px;overflow:hidden">
+    <div style="width:{strength}%;height:100%;background:{color};border-radius:4px"></div>
+  </div>
+  <div style="font-size:10px;color:#636366;margin-top:4px">{strength}% strength</div>
+</div>
+""", unsafe_allow_html=True)
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+    # Active signals callout
+    all_sigs = [_quick_signal(s, interval, period) for grp in groups for s in grp["symbols"]]
+    active = [(TICK_INFO[grp["symbols"][i]]["name"], _quick_signal(grp["symbols"][i], interval, period))
+              for grp in groups for i, s in enumerate(grp["symbols"])
+              if _quick_signal(s, interval, period)["direction"] != "NEUTRAL"]
+    if active:
+        st.divider()
+        st.markdown("**Active signals right now:**")
+        for name, sig in active:
+            color = "#30d158" if sig["direction"] == "LONG" else "#ff375f"
+            st.markdown(
+                f'<span style="color:{color};font-weight:700">{name} — {sig["direction"]}</span>'
+                f' &nbsp; score: {sig["score"]:+.1f}',
+                unsafe_allow_html=True
+            )
+    else:
+        st.divider()
+        st.info("No active signals right now — all markets are in a waiting state.")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     st.markdown(f"## TopStep Signal Monitor")
@@ -1695,7 +1789,8 @@ def main():
 
     st.divider()
 
-    tab_mnq, tab_es, tab_gold, tab_news, tab_log, tab_settings = st.tabs([
+    tab_home, tab_mnq, tab_es, tab_gold, tab_news, tab_log, tab_settings = st.tabs([
+        "Dashboard",
         "MNQ / NQ — Nasdaq",
         "MES / ES — S&P 500",
         "MGC / GC — Gold",
@@ -1703,6 +1798,9 @@ def main():
         "Trade Log",
         "Settings",
     ])
+
+    with tab_home:
+        render_dashboard(interval, period)
 
     with tab_mnq:
         sym = st.radio("Symbol", ["MNQ=F","NQ=F"], horizontal=True, key="sym_mnq",
