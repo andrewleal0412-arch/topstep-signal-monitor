@@ -1717,17 +1717,20 @@ def render_settings_tab():
 # ─── Dashboard Tab ────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def _quick_signal(symbol: str, interval: str, period: str) -> dict:
-    """Lightweight signal fetch for the dashboard overview."""
+    """Fetch full signal for dashboard — cached 30s."""
     try:
         df = fetch_data(symbol, interval, period)
         if df.empty:
-            return {"direction": "NEUTRAL", "score": 0, "price": None}
+            return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None}
         df = compute_indicators(df)
-        sig = generate_signal(df, symbol)
+        articles       = fetch_news()
+        news_sentiment = get_news_sentiment(symbol, articles)
+        sig            = generate_signal(df, symbol, news_sentiment)
+        check_open_trades(symbol, df)
         price = float(df.iloc[-1]["Close"])
-        return {"direction": sig["direction"], "score": sig["score"], "price": price}
+        return {"direction": sig["direction"], "score": sig["score"], "price": price, "_full": sig}
     except Exception:
-        return {"direction": "NEUTRAL", "score": 0, "price": None}
+        return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None}
 
 def render_dashboard(interval: str, period: str):
     st.markdown("### Market Overview")
@@ -1748,6 +1751,17 @@ def render_dashboard(interval: str, period: str):
             score = sig["score"]
             price = sig["price"]
             name = TICK_INFO[symbol]["name"]
+
+            # Record trade + send notification from dashboard so log updates even if user never visits instrument tabs
+            full_sig = sig.get("_full")
+            if full_sig and should_record_signal(full_sig, symbol):
+                record_signal(full_sig, symbol, interval)
+            if full_sig and full_sig["direction"] != "NEUTRAL":
+                notif_key = f"last_notif_{symbol}"
+                last_notif = st.session_state.get(notif_key)
+                if last_notif is None or (now_pt() - last_notif).total_seconds() > 900:
+                    send_notification(symbol, full_sig, TICK_INFO[symbol])
+                    st.session_state[notif_key] = now_pt()
 
             if d == "LONG":
                 bg      = "linear-gradient(135deg,#0d2b1a,#0a1f12)"
