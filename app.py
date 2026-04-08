@@ -1989,6 +1989,14 @@ def render_dashboard(interval: str, period: str):
 
             strength = int(abs(score) / 6.0 * 100)
             price_str = f"{price:,.2f}" if price else "—"
+            sess_on, sess_reason, _ = trading_session_active(symbol)
+            sess_badge = (
+                '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                'color:#34d399">● ACTIVE SESSION</div>'
+                if sess_on else
+                '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                'color:#fbbf24">⏸ PAUSED</div>'
+            )
 
             with col:
                 st.markdown(f"""
@@ -2003,6 +2011,7 @@ def render_dashboard(interval: str, period: str):
     <div style="width:{strength}%;height:100%;background:{color};border-radius:4px"></div>
   </div>
   <div style="font-size:10px;color:#636366;margin-top:4px">{strength}% strength</div>
+  {sess_badge}
 </div>
 """, unsafe_allow_html=True)
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
