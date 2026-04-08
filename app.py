@@ -2131,6 +2131,12 @@ def render_scale_guide(rules: dict):
 def render_settings_tab():
     cfg = load_config()
 
+    # ── Chart Timeframe ───────────────────────────────────────────────────────
+    st.markdown("### Chart Timeframe")
+    st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
+    st.caption("Controls the candle interval used on the MNQ, MES, and MGC chart tabs.")
+    st.divider()
+
     # ── Eval Tracker ──────────────────────────────────────────────────────────
     st.markdown("### Eval Tracker")
     acct = st.selectbox("Account Size", list(TOPSTEP_ACCOUNTS.keys()), key="acct")
@@ -2498,10 +2504,10 @@ def main():
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=30000, debounce=True, key="autorefresh")
 
-    interval = st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
-
+    # Timeframe lives in Settings — read from session state with default
     period_map = {"1m":"7d","2m":"60d","5m":"60d","15m":"60d","30m":"60d","1h":"730d"}
-    period = period_map.get(interval, "5d")
+    interval   = st.session_state.get("tf", "5m")
+    period     = period_map.get(interval, "60d")
 
     st.divider()
 
