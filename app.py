@@ -653,10 +653,21 @@ TOPSTEP_ACCOUNTS = {
 }
 
 TICK_INFO = {
-    "MNQ=F": {"tick": 0.25, "value": 0.50, "name": "MNQ"},
-    "MES=F": {"tick": 0.25, "value": 1.25, "name": "MES"},
-    "MGC=F": {"tick": 0.10, "value": 1.00, "name": "MGC"},
+    "MNQ=F": {"tick": 0.25, "value": 0.50,  "name": "MNQ"},
+    "MES=F": {"tick": 0.25, "value": 1.25,  "name": "MES"},
+    "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
 }
+
+# Fallback info for old/removed symbols still in the DB
+_SYMBOL_ALIAS = {
+    "NQ=F":  {"tick": 0.25, "value": 5.00,  "name": "NQ"},
+    "ES=F":  {"tick": 0.25, "value": 12.50, "name": "ES"},
+    "GC=F":  {"tick": 0.10, "value": 10.00, "name": "GC"},
+}
+
+def _ti(symbol: str) -> dict:
+    """Return tick info for a symbol, falling back to old-symbol aliases."""
+    return TICK_INFO.get(symbol) or _SYMBOL_ALIAS.get(symbol) or {"tick": 0.25, "value": 0, "name": symbol}
 
 # ─── Trade Persistence ────────────────────────────────────────────────────────
 def load_trades() -> list:
@@ -1513,7 +1524,8 @@ def render_trade_log():
     # ── Overall stats across all instruments ─────────────────────────────────
     stats_all = get_stats(all_trades)
     by_sym = {}
-    for sym in TICK_INFO:
+    all_syms = {**TICK_INFO, **_SYMBOL_ALIAS}
+    for sym in all_syms:
         s = get_stats(all_trades, sym)
         if s["total"] > 0 or s["open"] > 0:
             by_sym[sym] = s
@@ -1558,7 +1570,8 @@ def render_trade_log():
 
     # ── Filters ───────────────────────────────────────────────────────────────
     fc1, fc2, fc3 = st.columns(3)
-    sym_options = ["All"] + [TICK_INFO[s]["name"] for s in TICK_INFO
+    _all_ti = {**TICK_INFO, **_SYMBOL_ALIAS}
+    sym_options = ["All"] + [_all_ti[s]["name"] for s in _all_ti
                              if any(t["symbol"] == s for t in all_trades)]
     with fc1:
         f_sym = st.selectbox("Instrument", sym_options, key="log_sym")
@@ -1570,7 +1583,7 @@ def render_trade_log():
     # Apply filters
     filtered = list(reversed(all_trades))  # newest first
     if f_sym != "All":
-        filtered = [t for t in filtered if TICK_INFO.get(t["symbol"], {}).get("name") == f_sym]
+        filtered = [t for t in filtered if _ti(t["symbol"])["name"] == f_sym]
     if f_dir != "All":
         filtered = [t for t in filtered if t["direction"] == f_dir]
     if f_res == "Open":
@@ -1601,16 +1614,17 @@ def render_trade_log():
                          if t["direction"] == "LONG"
                          else '<span class="badge badge-short">SELL</span>')
 
-            name = TICK_INFO.get(t["symbol"], {}).get("name", t["symbol"])
+            _tinfo     = _ti(t["symbol"])
+            name = _tinfo["name"]
             ticks_str  = f'{t["pnl_ticks"]:+.1f}' if t.get("pnl_ticks") is not None else "—"
             ticks_color = "#30d158" if (t.get("pnl_ticks") or 0) > 0 else ("#ff375f" if (t.get("pnl_ticks") or 0) < 0 else "#8e8e93")
-            tick_val   = TICK_INFO.get(t["symbol"], {}).get("value", 0)
+            tick_val   = _tinfo["value"]
             dollar_str = f'${abs((t.get("pnl_ticks") or 0) * tick_val):,.0f}' if t.get("pnl_ticks") is not None else "—"
             dollar_color = ticks_color
 
             # % move from entry to exit level
             if t.get("pnl_ticks") is not None and t.get("entry") and t["entry"] != 0:
-                tick_sz   = TICK_INFO.get(t["symbol"], {}).get("tick", 0.25)
+                tick_sz   = _tinfo["tick"]
                 pts_moved = abs(t["pnl_ticks"]) * tick_sz
                 pct_move  = pts_moved / t["entry"] * 100
                 sign      = "+" if (t.get("pnl_ticks") or 0) > 0 else "-"
@@ -1900,23 +1914,6 @@ def render_dashboard(interval: str, period: str):
 """, unsafe_allow_html=True)
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    # Active signals callout
-    active = [(TICK_INFO[s]["name"], _quick_signal(s, interval, period))
-              for grp in groups for s in grp["symbols"]
-              if _quick_signal(s, interval, period)["direction"] != "NEUTRAL"]
-    if active:
-        st.divider()
-        st.markdown("**Active signals right now:**")
-        for name, sig in active:
-            color = "#30d158" if sig["direction"] == "LONG" else "#ff375f"
-            st.markdown(
-                f'<span style="color:{color};font-weight:700">{name} — {sig["direction"]}</span>'
-                f' &nbsp; score: {sig["score"]:+.1f}',
-                unsafe_allow_html=True
-            )
-    else:
-        st.divider()
-        st.info("No active signals right now — all markets are in a waiting state.")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
