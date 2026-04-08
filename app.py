@@ -1906,12 +1906,14 @@ def render_scale_guide(rules: dict):
 
 <h4>Best Times (California / PT)</h4>
 <table style="font-size:13px; border-collapse:collapse; width:100%">
-  <tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:5px 8px;color:#888">Market</th><th style="text-align:left;padding:5px 8px;color:#888">Best Window</th><th style="text-align:left;padding:5px 8px;color:#888">Notes</th></tr>
-  <tr><td style="padding:5px 8px">{tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>6:30–8:30 AM PT</b></td><td style="padding:5px 8px;color:#888">Market open — highest {tip('momentum','Momentum')}</td></tr>
-  <tr><td style="padding:5px 8px">{tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>11:00 AM–1:00 PM PT</b></td><td style="padding:5px 8px;color:#888">Market close — second best window</td></tr>
-  <tr><td style="padding:5px 8px">{tip('GC','GC')} / {tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>5:20 AM PT</b></td><td style="padding:5px 8px;color:#888">COMEX open</td></tr>
-  <tr><td style="padding:5px 8px">{tip('GC','GC')} / {tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>12:00–2:00 AM PT</b></td><td style="padding:5px 8px;color:#888">London session</td></tr>
-  <tr style="color:#ff8080"><td style="padding:5px 8px">❌ All</td><td style="padding:5px 8px"><b>9:00–10:30 AM PT</b></td><td style="padding:5px 8px">Lunch chop — slow, unpredictable</td></tr>
+  <tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:5px 8px;color:#888">Market</th><th style="text-align:left;padding:5px 8px;color:#888">Window</th><th style="text-align:left;padding:5px 8px;color:#888">Notes</th></tr>
+  <tr><td style="padding:5px 8px">{tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>6:30–8:30 AM PT</b></td><td style="padding:5px 8px;color:#888">Market open — highest {tip('momentum','Momentum')}. Bot active.</td></tr>
+  <tr><td style="padding:5px 8px">{tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>11:00 AM–1:00 PM PT</b></td><td style="padding:5px 8px;color:#888">Market close — second best window. Bot active.</td></tr>
+  <tr style="color:#ff8080"><td style="padding:5px 8px">❌ {tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>All other hours</b></td><td style="padding:5px 8px">Signals paused — equity futures go dead overnight</td></tr>
+  <tr><td style="padding:5px 8px">{tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>12:00–2:00 AM PT</b></td><td style="padding:5px 8px;color:#888">London session — strong gold moves</td></tr>
+  <tr><td style="padding:5px 8px">{tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>5:00–9:00 AM PT</b></td><td style="padding:5px 8px;color:#888">COMEX open — highest gold volume</td></tr>
+  <tr><td style="padding:5px 8px">{tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>All hours</b></td><td style="padding:5px 8px;color:#888">Gold trades 24h — bot records signals around the clock</td></tr>
+  <tr style="color:#ff8080"><td style="padding:5px 8px">❌ All</td><td style="padding:5px 8px"><b>8:30–11:00 AM PT</b></td><td style="padding:5px 8px">Midday chop — slow, unpredictable for MNQ/MES</td></tr>
 </table>
 
 <br><h4>{tip('Eval','Eval')} Tips</h4>
