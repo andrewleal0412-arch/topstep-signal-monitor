@@ -2020,32 +2020,15 @@ def _auth_token() -> str:
 def check_auth() -> bool:
     tok = _auth_token()
 
-    # If ?auth= is in URL and matches current token → authenticated
+    # Auto-auth if valid token is in URL (survives refresh as long as URL is kept)
     if st.query_params.get("auth") == tok:
         st.session_state["_auth"] = True
 
-    # If ?auth= is in URL but DOESN'T match (stale token from old password) → clear it
+    # Stale token in URL (password changed) — clear it and force re-login
     elif "auth" in st.query_params:
-        st.query_params.pop("auth")
-        # Also wipe localStorage so the stale token doesn't loop forever
-        components.html("""<script>
-        localStorage.removeItem('ts_auth');
-        </script>""", height=0)
-
-    # First load with no session and no query param: check localStorage
-    if not st.session_state.get("_auth") and not st.session_state.get("_ls_read") and "auth" not in st.query_params:
-        st.session_state["_ls_read"] = True
-        components.html(f"""<script>
-        var t = localStorage.getItem('ts_auth');
-        if (t === '{tok}') {{
-            var u = new URL(window.parent.location.href);
-            u.searchParams.set('auth', t);
-            window.parent.location.replace(u.toString());
-        }} else if (t) {{
-            // Stale token in localStorage — clear it
-            localStorage.removeItem('ts_auth');
-        }}
-        </script>""", height=0)
+        st.query_params.clear()
+        st.session_state.pop("_auth", None)
+        st.rerun()
 
     if st.session_state.get("_auth"):
         return True
@@ -2067,16 +2050,15 @@ def check_auth() -> bool:
             if hashlib.sha256(pw.encode()).hexdigest()[:28] == tok:
                 st.session_state["_auth"] = True
                 if remember:
-                    components.html(f"""<script>
-                    localStorage.setItem('ts_auth', '{tok}');
-                    var u = new URL(window.parent.location.href);
-                    u.searchParams.set('auth', '{tok}');
-                    window.parent.location.replace(u.toString());
-                    </script>""", height=0)
-                else:
-                    st.rerun()
+                    # Embed token in URL — browser keeps it on refresh, bookmark it to persist
+                    st.query_params["auth"] = tok
+                st.rerun()
             else:
                 st.error("Incorrect password — try again")
+
+        if remember:
+            st.caption("Tip: bookmark the page after logging in to stay signed in permanently.")
+
     return False
 
 
