@@ -1245,64 +1245,132 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
     }
 
 # ─── Chart ────────────────────────────────────────────────────────────────────
-def build_chart(df: pd.DataFrame, signal: dict) -> go.Figure:
+def build_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -> go.Figure:
     fig = make_subplots(
         rows=3, cols=1, shared_xaxes=True,
-        vertical_spacing=0.03, row_heights=[0.58, 0.21, 0.21],
+        vertical_spacing=0.02,
+        row_heights=[0.65, 0.18, 0.17],
+        subplot_titles=("", "RSI", "MACD"),
     )
-    plot_df = df.tail(200)
 
+    # Show last 120 candles by default — enough context, not too cluttered
+    plot_df = df.tail(120)
+
+    # ── Candlesticks ──────────────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
         x=plot_df.index,
         open=plot_df["Open"], high=plot_df["High"],
         low=plot_df["Low"],   close=plot_df["Close"],
         name="Price",
-        increasing_line_color="#00cc66", decreasing_line_color="#ff5050",
-        increasing_fillcolor="#00cc66",  decreasing_fillcolor="#ff5050",
+        increasing_line_color="#26a65b", decreasing_line_color="#e83030",
+        increasing_fillcolor="#26a65b",  decreasing_fillcolor="#e83030",
+        line=dict(width=1),
     ), row=1, col=1)
 
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA9"],  name="EMA9",  line=dict(color="#FFD700", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA21"], name="EMA21", line=dict(color="#FF8C00", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA50"], name="EMA50", line=dict(color="#FF4500", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["VWAP"],  name="VWAP",
-                             line=dict(color="#8888ff", width=1, dash="dot")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["BB_upper"], name="BB",
-                             line=dict(color="rgba(140,140,140,0.35)", width=1), showlegend=False), row=1, col=1)
+    # ── EMAs ─────────────────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA9"],  name="EMA9",
+                             line=dict(color="#f0c040", width=1.2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA21"], name="EMA21",
+                             line=dict(color="#f08030", width=1.2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA50"], name="EMA50",
+                             line=dict(color="#e05020", width=1.2)), row=1, col=1)
+
+    # ── VWAP ──────────────────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["VWAP"], name="VWAP",
+                             line=dict(color="#818cf8", width=1.2, dash="dot")), row=1, col=1)
+
+    # ── Bollinger Bands ───────────────────────────────────────────────────────
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["BB_upper"],
+                             line=dict(color="rgba(160,160,160,0.25)", width=1),
+                             showlegend=False, name="BB Up"), row=1, col=1)
     fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["BB_lower"],
-                             line=dict(color="rgba(140,140,140,0.35)", width=1),
-                             fill="tonexty", fillcolor="rgba(140,140,140,0.04)", showlegend=False, name="BB Lower"), row=1, col=1)
+                             line=dict(color="rgba(160,160,160,0.25)", width=1),
+                             fill="tonexty", fillcolor="rgba(160,160,160,0.04)",
+                             showlegend=False, name="BB Lo"), row=1, col=1)
 
-    if signal["entry"] is not None:
-        color = "#00cc66" if signal["direction"] == "LONG" else "#ff5050"
-        fig.add_hline(y=signal["entry"], line_color=color,    line_dash="solid", line_width=1.5, row=1, col=1)
-        fig.add_hline(y=signal["sl"],    line_color="#ff3333", line_dash="dash",  line_width=1,   row=1, col=1,
-                      annotation_text="SL", annotation_position="right", annotation_font_color="#ff3333")
-        fig.add_hline(y=signal["tp1"],   line_color="#00aa55", line_dash="dash",  line_width=1,   row=1, col=1,
-                      annotation_text="TP1", annotation_position="right", annotation_font_color="#00aa55")
-        fig.add_hline(y=signal["tp2"],   line_color="#00ff88", line_dash="dash",  line_width=1,   row=1, col=1,
-                      annotation_text="TP2", annotation_position="right", annotation_font_color="#00ff88")
+    # ── TP / SL level lines — use open trade if exists, else live signal ──────
+    lvls = None
+    if open_trade:
+        lvls = open_trade
+    elif signal.get("entry") is not None:
+        lvls = signal
 
+    if lvls:
+        entry = lvls["entry"]
+        sl    = lvls["sl"]
+        tp1   = lvls["tp1"]
+        tp2   = lvls["tp2"]
+        is_long = (lvls.get("direction", signal.get("direction", "LONG")) == "LONG")
+        entry_color = "#26a65b" if is_long else "#e83030"
+
+        def _hline(y, color, dash, width, label, label_color):
+            fig.add_hline(
+                y=y, line_color=color, line_dash=dash, line_width=width,
+                row=1, col=1,
+                annotation=dict(
+                    text=f"<b>{label}  {y:,.2f}</b>",
+                    xref="paper", x=1.0,
+                    font=dict(color=label_color, size=11, family="monospace"),
+                    bgcolor="rgba(14,17,23,0.85)",
+                    bordercolor=color,
+                    borderwidth=1,
+                    borderpad=3,
+                    showarrow=False,
+                    xanchor="left",
+                ),
+            )
+
+        _hline(entry, entry_color,  "solid", 2.0, "ENTRY", entry_color)
+        _hline(sl,    "#e83030",    "dash",  1.5, "SL   ", "#e83030")
+        _hline(tp1,   "#26a65b",    "dash",  1.5, "TP1  ", "#26a65b")
+        _hline(tp2,   "#34d399",    "dot",   1.2, "TP2  ", "#34d399")
+
+    # ── RSI ───────────────────────────────────────────────────────────────────
     fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["RSI"], name="RSI",
                              line=dict(color="#c084fc", width=1.5)), row=2, col=1)
-    for y, col in [(70, "rgba(255,80,80,0.3)"), (30, "rgba(0,200,100,0.3)"), (50, "rgba(200,200,200,0.1)")]:
-        fig.add_hline(y=y, line_color=col, line_dash="dot", row=2, col=1)
+    for y, clr in [(70, "rgba(232,48,48,0.25)"), (30, "rgba(38,166,91,0.25)"), (50, "rgba(255,255,255,0.06)")]:
+        fig.add_hline(y=y, line_color=clr, line_dash="dot", row=2, col=1)
 
-    colors_hist = ["#00cc66" if v >= 0 else "#ff5050" for v in plot_df["MACD_hist"]]
+    # ── MACD ──────────────────────────────────────────────────────────────────
+    colors_hist = ["#26a65b" if v >= 0 else "#e83030" for v in plot_df["MACD_hist"]]
     fig.add_trace(go.Bar(x=plot_df.index, y=plot_df["MACD_hist"], name="Hist",
-                         marker_color=colors_hist, opacity=0.7), row=3, col=1)
+                         marker_color=colors_hist, opacity=0.65), row=3, col=1)
     fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD"],        name="MACD",
-                             line=dict(color="#FFD700", width=1.2)), row=3, col=1)
-    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD_signal"], name="Sig",
-                             line=dict(color="#FF8C00", width=1.2)), row=3, col=1)
+                             line=dict(color="#f0c040", width=1.2)), row=3, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD_signal"], name="Signal",
+                             line=dict(color="#f08030", width=1.2)), row=3, col=1)
 
+    # ── Layout ────────────────────────────────────────────────────────────────
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-        height=600, margin=dict(l=0, r=80, t=10, b=0),
-        legend=dict(orientation="h", y=1.03, x=0, font_size=11),
-        xaxis_rangeslider_visible=False, font=dict(size=11),
+        template="plotly_dark",
+        paper_bgcolor="#0a0f1a",
+        plot_bgcolor="#0a0f1a",
+        height=720,
+        margin=dict(l=10, r=120, t=20, b=10),
+        legend=dict(
+            orientation="h", y=1.02, x=0,
+            font=dict(size=11, color="#94a3b8"),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        xaxis_rangeslider_visible=False,
+        font=dict(size=11, color="#94a3b8"),
+        hovermode="x unified",
+        dragmode="pan",
     )
-    fig.update_yaxes(gridcolor="rgba(255,255,255,0.04)")
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.04)")
+    fig.update_yaxes(
+        gridcolor="rgba(255,255,255,0.04)",
+        zeroline=False,
+        tickfont=dict(size=11),
+        side="right",
+    )
+    fig.update_xaxes(
+        gridcolor="rgba(255,255,255,0.04)",
+        showspikes=True, spikecolor="rgba(255,255,255,0.2)",
+        spikethickness=1, spikedash="dot",
+    )
+    # RSI axis bounds
+    fig.update_yaxes(range=[0, 100], row=2, col=1)
+
     return fig
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -1579,8 +1647,14 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    fig = build_chart(df, signal)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    fig = build_chart(df, signal, open_trade=open_trade)
+    st.plotly_chart(fig, use_container_width=True, config={
+        "displayModeBar": True,
+        "displaylogo": False,
+        "scrollZoom": True,
+        "modeBarButtonsToRemove": ["autoScale2d", "lasso2d", "select2d", "toggleSpikelines"],
+        "modeBarButtonsToAdd": ["drawline", "eraseshape"],
+    })
 
 
     # ── Row 5: Trade History ──────────────────────────────────────────────────
