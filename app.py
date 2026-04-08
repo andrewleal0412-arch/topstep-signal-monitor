@@ -1555,7 +1555,7 @@ def render_trade_log():
     if by_sym:
         cols = st.columns(len(by_sym))
         for i, (sym, s) in enumerate(by_sym.items()):
-            name = TICK_INFO[sym]["name"]
+            name = _ti(sym)["name"]
             wrc  = "#30d158" if s["win_rate"] >= 55 else ("#ffd60a" if s["win_rate"] >= 40 else "#ff375f")
             tc   = "pos" if s["total_ticks"] >= 0 else "neg"
             cols[i].markdown(f"""
