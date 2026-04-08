@@ -1717,8 +1717,8 @@ def render_trade_log():
 
     # ── In-hours vs Off-hours win rates ──────────────────────────────────────
     closed = [t for t in all_trades if t["status"] != "open"]
-    in_h   = [t for t in closed if trade_in_session(t["symbol"], t["timestamp"])]
-    off_h  = [t for t in closed if not trade_in_session(t["symbol"], t["timestamp"])]
+    in_h   = [t for t in closed if t["symbol"] in _SESSION_GATE_EXEMPT or trade_in_session(t["symbol"], t["timestamp"])]
+    off_h  = [t for t in closed if t["symbol"] not in _SESSION_GATE_EXEMPT and not trade_in_session(t["symbol"], t["timestamp"])]
 
     def _wr(trades_subset):
         if not trades_subset:
@@ -1838,7 +1838,7 @@ def render_trade_log():
             except Exception:
                 ts = t["timestamp"][:16]
 
-            in_sess = trade_in_session(t["symbol"], t["timestamp"])
+            in_sess = t["symbol"] in _SESSION_GATE_EXEMPT or trade_in_session(t["symbol"], t["timestamp"])
             sess_badge = ('<span style="font-size:10px;font-weight:700;color:#34d399">IN HOURS</span>'
                          if in_sess else
                          '<span style="font-size:10px;font-weight:700;color:#636366">OFF HOURS</span>')
