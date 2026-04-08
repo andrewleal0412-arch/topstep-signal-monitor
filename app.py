@@ -1335,10 +1335,10 @@ def render_news_tab():
                 unsafe_allow_html=True)
 
     # ── Article cards ─────────────────────────────────────────────────────────
+    cards_html = ""
     for a in filtered[:25]:
         label, color, emoji = sentiment_label(a["compound"])
 
-        # Age display
         if a["age_min"] < 60:
             age_str = f"{int(a['age_min'])}m ago"
         elif a["age_min"] < 1440:
@@ -1346,40 +1346,55 @@ def render_news_tab():
         else:
             age_str = f"{int(a['age_min']/1440)}d ago"
 
-        # Instrument tags (controlled strings only — no user text)
         tag_map = {"nasdaq": "MNQ/NQ", "sp500": "MES/ES", "gold": "GC/MGC", "macro": "ALL"}
-        inst_labels = [tag_map[g] for g in a["groups"] if g in tag_map]
+        inst_tags = "".join(
+            f'<span style="background:rgba(10,132,255,0.15);color:#0a84ff;border-radius:4px;'
+            f'padding:1px 7px;font-size:10px;font-weight:600;margin-left:4px">{tag_map[g]}</span>'
+            for g in a["groups"] if g in tag_map
+        )
+        mover_badge = (
+            '<span style="background:rgba(255,214,10,0.15);color:#ffd60a;border-radius:4px;'
+            'padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">MARKET MOVER</span>'
+            if a["high_impact"] else ""
+        )
+        tone_badge = (
+            f'<span style="background:rgba(255,255,255,0.06);border-radius:4px;'
+            f'padding:1px 8px;font-size:10px;font-weight:600;color:{color};margin-left:6px">{label}</span>'
+        )
+        bar_pct = int(abs(a["compound"]) * 100)
 
-        # Summary — plain text only, no HTML injection
-        summary_text = a["summary"][:200] + ("…" if len(a["summary"]) > 200 else "")
+        safe_title   = html.escape(a["title"])
+        safe_summary = html.escape(a["summary"][:200] + ("…" if len(a["summary"]) > 200 else ""))
+        safe_source  = html.escape(a["source"])
 
-        # Card border color via left-border trick (no user text in HTML)
-        mover_flag = " ⚡ MARKET MOVER" if a["high_impact"] else ""
+        cards_html += f"""
+<div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.07);border-left:3px solid {color};
+     border-radius:12px;padding:16px 18px;margin:8px 0;
+     font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif">
+  <div style="display:flex;align-items:flex-start;gap:14px">
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:600;color:#f5f5f7;line-height:1.45;margin-bottom:6px">
+        {safe_title}{mover_badge}
+      </div>
+      <div style="font-size:12px;color:#8e8e93;line-height:1.55;margin-bottom:10px;font-weight:400">
+        {safe_summary}
+      </div>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+        <span style="font-size:11px;color:#636366;font-weight:400">{safe_source} · {age_str}</span>
+        {tone_badge}{inst_tags}
+      </div>
+    </div>
+    <div style="text-align:right;flex-shrink:0;min-width:54px">
+      <div style="font-size:1.1em;font-weight:700;color:{color};line-height:1">{a['compound']:+.2f}</div>
+      <div style="font-size:9px;color:#636366;margin-top:2px;text-transform:uppercase;letter-spacing:0.05em">mood</div>
+      <div style="background:rgba(255,255,255,0.08);border-radius:3px;height:3px;margin-top:8px">
+        <div style="width:{bar_pct}%;height:100%;background:{color};border-radius:3px"></div>
+      </div>
+    </div>
+  </div>
+</div>"""
 
-        with st.container():
-            st.markdown(
-                f'<div style="border-left:3px solid {color};background:#1c1c1e;'
-                f'border-radius:10px;padding:12px 16px;margin:6px 0;'
-                f'border:1px solid rgba(255,255,255,0.07);border-left:3px solid {color}"></div>',
-                unsafe_allow_html=True
-            )
-            col_main, col_score = st.columns([5, 1])
-            with col_main:
-                st.markdown(f"**{emoji} {a['title']}{mover_flag}**")
-                st.caption(summary_text)
-                tags_str = "  ·  ".join(inst_labels)
-                meta = f"{a['source']} · {age_str}"
-                if tags_str:
-                    meta += f"  ·  {tags_str}"
-                st.markdown(
-                    f'<span style="font-size:11px;color:#636366">{meta}</span>'
-                    f'  <span style="background:rgba(255,255,255,0.06);border-radius:4px;'
-                    f'padding:1px 8px;font-size:11px;font-weight:600;color:{color}">{label}</span>',
-                    unsafe_allow_html=True
-                )
-            with col_score:
-                st.metric(label="", value=f"{a['compound']:+.2f}")
-            st.divider()
+    st.markdown(cards_html, unsafe_allow_html=True)
 
     # ── Economic event reminder ───────────────────────────────────────────────
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
