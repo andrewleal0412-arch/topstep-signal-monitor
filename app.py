@@ -283,13 +283,53 @@ st.set_page_config(
 # ─── CSS ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── Apple-style font stack ── */
-html, body, [class*="css"] {
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display',
-                 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+/* ── Base — deep navy background ── */
+html, body, [class*="css"], .stApp {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif !important;
+    background-color: #080c14 !important;
+    color: #e2e8f0 !important;
 }
+
+/* ── Page background ── */
+.stApp { background: #080c14 !important; }
+section.main > div { background: #080c14 !important; }
+
+/* ── Streamlit tab overrides ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+    gap: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    color: #64748b !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    padding: 10px 18px !important;
+    border-radius: 8px 8px 0 0 !important;
+    border: none !important;
+    letter-spacing: 0.01em;
+}
+.stTabs [aria-selected="true"] {
+    background: rgba(99,102,241,0.1) !important;
+    color: #818cf8 !important;
+    border-bottom: 2px solid #818cf8 !important;
+}
+.stTabs [data-baseweb="tab-panel"] { padding-top: 20px !important; }
+
+/* ── Selectbox / inputs ── */
+.stSelectbox > div > div {
+    background: #0f1520 !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 8px !important;
+    color: #e2e8f0 !important;
+}
+.stToggle label { color: #94a3b8 !important; }
 
 /* ── Metric cards ── */
 .metrics-grid {
@@ -299,73 +339,90 @@ html, body, [class*="css"] {
     margin-bottom: 20px;
 }
 .mc {
-    background: #1c1c1e;
-    border: 1px solid rgba(255,255,255,0.08);
+    background: #0f1520;
+    border: 1px solid rgba(255,255,255,0.06);
     border-radius: 12px;
     padding: 14px 16px;
-    min-height: 76px;
+    min-height: 80px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    position: relative;
+    overflow: hidden;
+}
+.mc::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(129,140,248,0.3), transparent);
 }
 .mc-label {
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #8e8e93;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: #475569;
 }
 .mc-value {
-    font-size: 1.45em;
+    font-size: 1.4em;
     font-weight: 700;
-    color: #f5f5f7;
+    color: #f1f5f9;
     letter-spacing: -0.02em;
     line-height: 1;
     margin: 6px 0 4px;
 }
 .mc-delta { font-size: 11px; font-weight: 500; }
-.pos { color: #30d158; }
-.neg { color: #ff375f; }
-.neu { color: #8e8e93; }
+.pos { color: #34d399; }
+.neg { color: #f87171; }
+.neu { color: #475569; }
+.clr-pos { color: #34d399; }
+.clr-neg { color: #f87171; }
 
 /* ── Signal banner ── */
 .sig-banner {
-    border-radius: 14px;
-    padding: 18px 24px;
+    border-radius: 16px;
+    padding: 20px 26px;
     display: flex;
     align-items: center;
     gap: 20px;
     margin-bottom: 16px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    position: relative;
+    overflow: hidden;
 }
-.sig-banner-long  { background: linear-gradient(135deg, #0d2b1a 0%, #0a1f12 100%); border: 1px solid rgba(48,209,88,0.35); }
-.sig-banner-short { background: linear-gradient(135deg, #2b0d12 0%, #1f0a0d 100%); border: 1px solid rgba(255,55,95,0.35); }
-.sig-banner-neu   { background: #1c1c1e; border: 1px solid rgba(255,255,255,0.08); }
-
+.sig-banner-long {
+    background: linear-gradient(135deg, #052e16 0%, #0a1f12 100%);
+    border: 1px solid rgba(52,211,153,0.25);
+    box-shadow: 0 0 40px rgba(52,211,153,0.08), inset 0 1px 0 rgba(52,211,153,0.1);
+}
+.sig-banner-short {
+    background: linear-gradient(135deg, #2d0a0a 0%, #1f0a0d 100%);
+    border: 1px solid rgba(248,113,113,0.25);
+    box-shadow: 0 0 40px rgba(248,113,113,0.08), inset 0 1px 0 rgba(248,113,113,0.1);
+}
+.sig-banner-neu {
+    background: #0f1520;
+    border: 1px solid rgba(255,255,255,0.06);
+}
 .sig-icon   { font-size: 2.2em; line-height: 1; flex-shrink: 0; }
 .sig-center { flex: 1; }
-.sig-dir    { font-size: 1.6em; font-weight: 800; letter-spacing: 0.04em; line-height: 1; }
-.sig-sub    { font-size: 12px; color: #8e8e93; margin-top: 4px; font-weight: 500; }
-
+.sig-dir    { font-size: 1.7em; font-weight: 800; letter-spacing: 0.02em; line-height: 1; }
+.sig-sub    { font-size: 12px; color: #64748b; margin-top: 5px; font-weight: 400; }
 .sig-right  { text-align: right; flex-shrink: 0; }
-.sig-score-num { font-size: 1.8em; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
-.sig-score-lbl { font-size: 11px; color: #8e8e93; margin-top: 2px; font-weight: 500; }
+.sig-score-num { font-size: 1.9em; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+.sig-score-lbl { font-size: 11px; color: #475569; margin-top: 2px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; }
 
 /* strength bar */
 .strength-bar-wrap {
-    background: rgba(255,255,255,0.08);
-    border-radius: 4px;
-    height: 5px;
-    margin-top: 10px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 99px;
+    height: 4px;
+    margin-top: 12px;
     overflow: hidden;
     width: 100%;
     max-width: 260px;
 }
-.strength-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+.strength-bar-fill { height: 100%; border-radius: 99px; }
 
 /* ── Two-column panel ── */
 .panel-grid {
@@ -375,19 +432,18 @@ html, body, [class*="css"] {
     margin-bottom: 16px;
 }
 .panel-card {
-    background: #1c1c1e;
-    border: 1px solid rgba(255,255,255,0.08);
+    background: #0f1520;
+    border: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
     padding: 18px 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 .panel-title {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: #8e8e93;
-    margin-bottom: 12px;
+    color: #475569;
+    margin-bottom: 14px;
 }
 
 /* ── Reason items ── */
@@ -395,83 +451,83 @@ html, body, [class*="css"] {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 10px;
-    margin: 5px 0;
-    background: rgba(255,255,255,0.04);
+    padding: 9px 12px;
+    margin: 4px 0;
+    background: rgba(255,255,255,0.03);
     border-radius: 8px;
     font-size: 13px;
-    font-weight: 500;
-    color: #ebebf5;
-    border-left: 3px solid transparent;
+    font-weight: 400;
+    color: #cbd5e1;
+    border-left: 2px solid transparent;
 }
-.reason-bull { border-left-color: #30d158; }
-.reason-bear { border-left-color: #ff375f; }
+.reason-bull { border-left-color: #34d399; }
+.reason-bear { border-left-color: #f87171; }
 
 /* ── Trade levels table ── */
 .tl-table { width: 100%; border-collapse: collapse; }
-.tl-table tr { border-bottom: 1px solid rgba(255,255,255,0.05); }
+.tl-table tr { border-bottom: 1px solid rgba(255,255,255,0.04); }
 .tl-table tr:last-child { border-bottom: none; }
-.tl-table td { padding: 8px 6px; font-size: 13px; vertical-align: middle; }
-.tl-label { color: #8e8e93; font-weight: 500; width: 50px; }
-.tl-price { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; }
-.tl-meta  { color: #8e8e93; font-size: 11px; text-align: right; }
-.mono { font-family: 'SF Mono', 'Fira Code', monospace; }
+.tl-table td { padding: 9px 8px; font-size: 13px; vertical-align: middle; }
+.tl-label { color: #475569; font-weight: 500; width: 50px; }
+.tl-price { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; color: #f1f5f9; }
+.tl-meta  { color: #475569; font-size: 11px; text-align: right; }
+.mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
 
 /* ── Stats pills ── */
 .stats-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .stat-pill {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 20px;
-    padding: 5px 12px;
+    background: rgba(129,140,248,0.08);
+    border: 1px solid rgba(129,140,248,0.15);
+    border-radius: 99px;
+    padding: 4px 12px;
     font-size: 12px;
     font-weight: 500;
-    color: #ebebf5;
+    color: #94a3b8;
     white-space: nowrap;
 }
-.stat-pill span { color: #8e8e93; margin-right: 4px; }
+.stat-pill span { color: #475569; margin-right: 4px; }
 
 /* ── Trade history table ── */
 .th-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .th-table th {
-    font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
-    text-transform: uppercase; color: #8e8e93;
-    padding: 8px 10px; text-align: left;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    background: #1c1c1e;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #475569;
+    padding: 10px 12px; text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: #0a0f1a;
 }
-.th-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); color: #ebebf5; }
-.th-table tr:hover td { background: rgba(255,255,255,0.03); }
+.th-table td { padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); color: #cbd5e1; }
+.th-table tr:hover td { background: rgba(129,140,248,0.04); }
 
 /* ── Badges ── */
 .badge {
-    display: inline-block; padding: 3px 9px;
-    border-radius: 20px; font-size: 10px;
-    font-weight: 700; letter-spacing: 0.04em;
-    white-space: nowrap;
+    display: inline-block; padding: 3px 10px;
+    border-radius: 99px; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; white-space: nowrap;
 }
-.badge-win2  { background: rgba(48,209,88,0.15);  color: #30d158; }
-.badge-win1  { background: rgba(48,209,88,0.1);   color: #30d158; }
-.badge-loss  { background: rgba(255,55,95,0.15);   color: #ff375f; }
-.badge-open  { background: rgba(255,214,10,0.12);  color: #ffd60a; }
-.badge-long  { background: rgba(10,132,255,0.15);  color: #0a84ff; }
-.badge-short { background: rgba(191,90,242,0.15);  color: #bf5af2; }
+.badge-win2  { background: rgba(52,211,153,0.12);  color: #34d399; border: 1px solid rgba(52,211,153,0.2); }
+.badge-win1  { background: rgba(52,211,153,0.08);  color: #34d399; border: 1px solid rgba(52,211,153,0.15); }
+.badge-loss  { background: rgba(248,113,113,0.12);  color: #f87171; border: 1px solid rgba(248,113,113,0.2); }
+.badge-open  { background: rgba(251,191,36,0.1);   color: #fbbf24; border: 1px solid rgba(251,191,36,0.2); }
+.badge-long  { background: rgba(129,140,248,0.12);  color: #818cf8; border: 1px solid rgba(129,140,248,0.2); }
+.badge-short { background: rgba(192,132,252,0.12);  color: #c084fc; border: 1px solid rgba(192,132,252,0.2); }
 
 /* ── Tooltips ── */
 .tt {
     position: relative; display: inline; cursor: help;
-    border-bottom: 1px dashed rgba(255,255,255,0.3);
+    border-bottom: 1px dashed rgba(255,255,255,0.2);
 }
 .tt .tt-box {
     visibility: hidden; opacity: 0;
-    background: #2c2c2e; color: #ebebf5;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px; padding: 10px 13px;
+    background: #1e2a3a; color: #e2e8f0;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 10px 14px;
     position: absolute; bottom: calc(100% + 8px);
     left: 50%; transform: translateX(-50%);
-    width: 240px; font-size: 12px; line-height: 1.55;
+    width: 240px; font-size: 12px; line-height: 1.6;
     z-index: 9999; white-space: normal;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     transition: opacity 0.15s ease; pointer-events: none;
     font-weight: 400;
 }
@@ -479,10 +535,58 @@ html, body, [class*="css"] {
 .tt-icon {
     display: inline-flex; align-items: center; justify-content: center;
     width: 14px; height: 14px; border-radius: 50%;
-    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
-    font-size: 9px; font-weight: 700; color: #8e8e93;
+    background: rgba(129,140,248,0.15); border: 1px solid rgba(129,140,248,0.25);
+    font-size: 9px; font-weight: 700; color: #818cf8;
     margin-left: 3px; vertical-align: middle; cursor: help; flex-shrink: 0;
 }
+
+/* ── Dividers ── */
+hr { border-color: rgba(255,255,255,0.05) !important; }
+
+/* ── Expanders ── */
+.streamlit-expanderHeader {
+    background: #0f1520 !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 10px !important;
+    color: #94a3b8 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+}
+.streamlit-expanderContent {
+    background: #0a0f1a !important;
+    border: 1px solid rgba(255,255,255,0.05) !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+}
+
+/* ── Buttons ── */
+.stButton > button {
+    background: rgba(129,140,248,0.1) !important;
+    border: 1px solid rgba(129,140,248,0.25) !important;
+    color: #818cf8 !important;
+    border-radius: 8px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    letter-spacing: 0.01em;
+}
+.stButton > button:hover {
+    background: rgba(129,140,248,0.18) !important;
+    border-color: rgba(129,140,248,0.4) !important;
+}
+
+/* ── Progress bars ── */
+.stProgress > div > div {
+    background: rgba(255,255,255,0.06) !important;
+    border-radius: 99px !important;
+}
+.stProgress > div > div > div {
+    background: linear-gradient(90deg, #6366f1, #818cf8) !important;
+    border-radius: 99px !important;
+}
+
+/* ── Info / warning / error boxes ── */
+.stAlert { border-radius: 10px !important; border-left-width: 3px !important; }
 
 /* ── Hide Streamlit chrome ── */
 #MainMenu, footer, header { visibility: hidden; }
