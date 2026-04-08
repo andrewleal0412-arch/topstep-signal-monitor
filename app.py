@@ -1312,7 +1312,18 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     # ── Session status banner ────────────────────────────────────────────────
     sess_active, sess_reason, sess_next = trading_session_active(symbol)
-    if sess_active:
+    if symbol in _SESSION_GATE_EXEMPT:
+        # MGC trades 24h — always show as active, no paused state
+        st.markdown("""
+<div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
+     border-radius:10px;padding:9px 16px;margin-bottom:12px;
+     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
+  <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
+       box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
+  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE 24H</span>
+  <span style="font-size:12px;color:#64748b">— Gold trades around the clock</span>
+</div>""", unsafe_allow_html=True)
+    elif sess_active:
         st.markdown(f"""
 <div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
      border-radius:10px;padding:9px 16px;margin-bottom:12px;
@@ -2075,13 +2086,17 @@ def render_dashboard(interval: str, period: str):
             strength = int(abs(score) / 6.0 * 100)
             price_str = f"{price:,.2f}" if price else "—"
             sess_on, sess_reason, _ = trading_session_active(symbol)
-            sess_badge = (
-                '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                'color:#34d399">● ACTIVE SESSION</div>'
-                if sess_on else
-                '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                'color:#fbbf24">⏸ PAUSED</div>'
-            )
+            if symbol in _SESSION_GATE_EXEMPT:
+                sess_badge = ('<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                              'color:#34d399">● ACTIVE 24H</div>')
+            else:
+                sess_badge = (
+                    '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                    'color:#34d399">● ACTIVE SESSION</div>'
+                    if sess_on else
+                    '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                    'color:#fbbf24">⏸ PAUSED</div>'
+                )
 
             with col:
                 st.markdown(f"""
