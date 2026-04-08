@@ -32,12 +32,9 @@ logging.basicConfig(
 log = logging.getLogger("topstep-worker")
 
 TICK_INFO = {
-    "MNQ=F": {"tick": 0.25, "value": 0.50,  "name": "MNQ"},
-    "NQ=F":  {"tick": 0.25, "value": 5.00,  "name": "NQ"},
-    "MES=F": {"tick": 0.25, "value": 1.25,  "name": "MES"},
-    "ES=F":  {"tick": 0.25, "value": 12.50, "name": "ES"},
-    "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
-    "GC=F":  {"tick": 0.10, "value": 10.00, "name": "GC"},
+    "MNQ=F": {"tick": 0.25, "value": 0.50, "name": "MNQ"},
+    "MES=F": {"tick": 0.25, "value": 1.25, "name": "MES"},
+    "MGC=F": {"tick": 0.10, "value": 1.00, "name": "MGC"},
 }
 
 SYMBOL_GROUPS = {
@@ -300,8 +297,11 @@ def generate_signal(df: pd.DataFrame, symbol: str, news_sentiment: dict) -> dict
 def should_record(signal: dict, symbol: str) -> bool:
     if signal["direction"] == "NEUTRAL":
         return False
-    trades    = load_trades()
+    trades     = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
+    # Max 1 open trade per symbol at a time
+    if any(t["status"] == "open" for t in sym_trades):
+        return False
     if not sym_trades:
         return True
     last = sym_trades[-1]
@@ -337,6 +337,8 @@ def record_signal(signal: dict, symbol: str) -> dict:
     }
     save_single_trade(trade)
     log.info(f"Recorded {signal['direction']} on {symbol} | score {signal['score']:+.1f}")
+    # Notify with exact saved trade values so TP numbers match the log
+    send_notification(symbol, trade)
     return trade
 
 def check_open_trades(symbol: str, df: pd.DataFrame):
@@ -432,9 +434,6 @@ def run_once():
 
             if should_record(sig, symbol):
                 record_signal(sig, symbol)
-                maybe_notify(symbol, sig)
-            elif sig["direction"] != "NEUTRAL":
-                maybe_notify(symbol, sig)
 
         except Exception as e:
             log.error(f"{symbol} error: {e}")

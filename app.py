@@ -549,12 +549,9 @@ TOPSTEP_ACCOUNTS = {
 }
 
 TICK_INFO = {
-    "MNQ=F": {"tick": 0.25, "value": 0.50,  "name": "MNQ"},
-    "NQ=F":  {"tick": 0.25, "value": 5.00,  "name": "NQ"},
-    "MES=F": {"tick": 0.25, "value": 1.25,  "name": "MES"},
-    "ES=F":  {"tick": 0.25, "value": 12.50, "name": "ES"},
-    "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
-    "GC=F":  {"tick": 0.10, "value": 10.00, "name": "GC"},
+    "MNQ=F": {"tick": 0.25, "value": 0.50, "name": "MNQ"},
+    "MES=F": {"tick": 0.25, "value": 1.25, "name": "MES"},
+    "MGC=F": {"tick": 0.10, "value": 1.00, "name": "MGC"},
 }
 
 # ─── Trade Persistence ────────────────────────────────────────────────────────
@@ -586,25 +583,33 @@ def save_single_trade(trade: dict):
         pass
 
 def should_record_signal(signal: dict, symbol: str) -> bool:
-    """Use the JSON file (not session state) to decide if this is a genuinely new signal.
-    Guards against: restart duplication, same-direction spam, rapid flipping noise."""
+    """Only record a new signal if:
+    - Direction is not NEUTRAL
+    - No open trade already exists for this symbol (max 1 per symbol)
+    - Direction changed from last recorded trade
+    - At least 15 min since last trade on this symbol
+    """
     if signal["direction"] == "NEUTRAL":
         return False
     trades = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
+
+    # Block if there's already an open trade on this symbol
+    if any(t["status"] == "open" for t in sym_trades):
+        return False
+
     if not sym_trades:
         return True
     last = sym_trades[-1]
-    # Same direction as last recorded trade → skip (survives restarts)
+    # Same direction as last trade → skip
     if last["direction"] == signal["direction"]:
         return False
-    # Cooldown: don't record a new signal within 15 minutes of the last one
+    # Cooldown: 15 min minimum between signals
     try:
         last_time = datetime.fromisoformat(last["timestamp"])
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
-        elapsed_min = (now_pt() - last_time).total_seconds() / 60
-        if elapsed_min < 15:
+        if (now_pt() - last_time).total_seconds() < 900:
             return False
     except Exception:
         pass
@@ -629,7 +634,8 @@ def record_signal(signal: dict, symbol: str, interval: str) -> dict:
         "pnl_ticks": None,
     }
     save_single_trade(trade)
-    send_notification(symbol, signal, TICK_INFO[symbol])
+    # Send notification using exact saved trade values so TP numbers always match the log
+    send_notification(symbol, trade, TICK_INFO[symbol])
     return trade
 
 _MAX_PERIOD = {"1m": "7d", "2m": "60d", "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d"}
@@ -1725,9 +1731,9 @@ def render_dashboard(interval: str, period: str):
     st.caption("Live signal status for all markets — refreshes every 30 seconds")
 
     groups = [
-        {"label": "Nasdaq",  "symbols": ["MNQ=F", "NQ=F"]},
-        {"label": "S&P 500", "symbols": ["MES=F", "ES=F"]},
-        {"label": "Gold",    "symbols": ["GC=F",  "MGC=F"]},
+        {"label": "Nasdaq",  "symbols": ["MNQ=F"]},
+        {"label": "S&P 500", "symbols": ["MES=F"]},
+        {"label": "Gold",    "symbols": ["MGC=F"]},
     ]
 
     for group in groups:
@@ -1791,9 +1797,8 @@ def render_dashboard(interval: str, period: str):
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
     # Active signals callout
-    all_sigs = [_quick_signal(s, interval, period) for grp in groups for s in grp["symbols"]]
-    active = [(TICK_INFO[grp["symbols"][i]]["name"], _quick_signal(grp["symbols"][i], interval, period))
-              for grp in groups for i, s in enumerate(grp["symbols"])
+    active = [(TICK_INFO[s]["name"], _quick_signal(s, interval, period))
+              for grp in groups for s in grp["symbols"]
               if _quick_signal(s, interval, period)["direction"] != "NEUTRAL"]
     if active:
         st.divider()
@@ -1827,11 +1832,11 @@ def main():
 
     st.divider()
 
-    tab_home, tab_mnq, tab_es, tab_gold, tab_news, tab_log, tab_settings = st.tabs([
+    tab_home, tab_mnq, tab_mes, tab_mgc, tab_news, tab_log, tab_settings = st.tabs([
         "Dashboard",
-        "MNQ / NQ — Nasdaq",
-        "MES / ES — S&P 500",
-        "MGC / GC — Gold",
+        "MNQ — Nasdaq",
+        "MES — S&P 500",
+        "MGC — Gold",
         "News",
         "Trade Log",
         "Settings",
@@ -1841,22 +1846,16 @@ def main():
         render_dashboard(interval, period)
 
     with tab_mnq:
-        sym = st.radio("Symbol", ["MNQ=F","NQ=F"], horizontal=True, key="sym_mnq",
-                       captions=["Micro — $0.50/tick", "E-mini — $5.00/tick"])
         st.divider()
-        render_instrument(sym, interval, period)
+        render_instrument("MNQ=F", interval, period)
 
-    with tab_es:
-        sym = st.radio("Symbol", ["MES=F","ES=F"], horizontal=True, key="sym_es",
-                       captions=["Micro — $1.25/tick", "E-mini — $12.50/tick"])
+    with tab_mes:
         st.divider()
-        render_instrument(sym, interval, period)
+        render_instrument("MES=F", interval, period)
 
-    with tab_gold:
-        sym = st.radio("Symbol", ["GC=F","MGC=F"], horizontal=True, key="sym_gold",
-                       captions=["Gold — $10.00/tick", "Micro Gold — $1.00/tick"])
+    with tab_mgc:
         st.divider()
-        render_instrument(sym, interval, period)
+        render_instrument("MGC=F", interval, period)
 
     with tab_news:
         render_news_tab()
