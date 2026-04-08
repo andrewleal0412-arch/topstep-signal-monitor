@@ -1249,23 +1249,28 @@ _CHART_CFG = {
     "displayModeBar": True, "displaylogo": False, "scrollZoom": True,
     "modeBarButtonsToRemove": ["autoScale2d", "lasso2d", "select2d", "toggleSpikelines"],
 }
-_CHART_LAYOUT = dict(
-    template="plotly_dark", paper_bgcolor="#0a0f1a", plot_bgcolor="#0a0f1a",
-    margin=dict(l=10, r=120, t=28, b=10),
-    font=dict(size=11, color="#94a3b8"),
-    hovermode="x unified", dragmode="pan",
-    xaxis=dict(
-        gridcolor="rgba(255,255,255,0.04)", rangeslider_visible=False,
-        showspikes=True, spikecolor="rgba(255,255,255,0.18)",
-        spikethickness=1, spikedash="dot",
-    ),
-    yaxis=dict(
-        gridcolor="rgba(255,255,255,0.04)", zeroline=False,
-        tickfont=dict(size=11), side="right",
-    ),
-    legend=dict(orientation="h", y=1.06, x=0,
-                font=dict(size=11, color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
-)
+
+def _chart_layout(height: int, title: str, yaxis_range=None) -> dict:
+    yaxis = dict(gridcolor="rgba(255,255,255,0.04)", zeroline=False,
+                 tickfont=dict(size=11), side="right")
+    if yaxis_range:
+        yaxis["range"] = yaxis_range
+    return dict(
+        template="plotly_dark", paper_bgcolor="#0a0f1a", plot_bgcolor="#0a0f1a",
+        height=height,
+        margin=dict(l=10, r=120, t=28, b=10),
+        font=dict(size=11, color="#94a3b8"),
+        hovermode="x unified", dragmode="pan",
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,0.04)", rangeslider_visible=False,
+            showspikes=True, spikecolor="rgba(255,255,255,0.18)",
+            spikethickness=1, spikedash="dot",
+        ),
+        yaxis=yaxis,
+        legend=dict(orientation="h", y=1.06, x=0,
+                    font=dict(size=11, color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
+        title=dict(text=title, font=dict(size=12, color="#64748b"), x=0),
+    )
 
 def _hline_annotation(fig, y, color, dash, width, label):
     fig.add_hline(
@@ -1312,9 +1317,7 @@ def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -
         _hline_annotation(fig, lvls["tp1"],   "#26a65b",   "dash",  1.5, "TP1  ")
         _hline_annotation(fig, lvls["tp2"],   "#34d399",   "dot",   1.2, "TP2  ")
 
-    layout = dict(**_CHART_LAYOUT, height=520,
-                  title=dict(text="Price  ·  EMA 9/21/50  ·  VWAP  ·  BB", font=dict(size=12, color="#64748b"), x=0))
-    fig.update_layout(**layout)
+    fig.update_layout(**_chart_layout(520, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB"))
     return fig
 
 def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
@@ -1325,10 +1328,7 @@ def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
                              fillcolor="rgba(192,132,252,0.06)"))
     for y, clr in [(70, "rgba(232,48,48,0.35)"), (30, "rgba(38,166,91,0.35)"), (50, "rgba(255,255,255,0.08)")]:
         fig.add_hline(y=y, line_color=clr, line_dash="dot", line_width=1)
-    layout = dict(**_CHART_LAYOUT, height=220,
-                  yaxis=dict(**_CHART_LAYOUT["yaxis"], range=[0, 100]),
-                  title=dict(text="RSI  (14)", font=dict(size=12, color="#64748b"), x=0))
-    fig.update_layout(**layout)
+    fig.update_layout(**_chart_layout(220, "RSI  (14)", yaxis_range=[0, 100]))
     return fig
 
 def build_macd_chart(df: pd.DataFrame) -> go.Figure:
@@ -1339,9 +1339,7 @@ def build_macd_chart(df: pd.DataFrame) -> go.Figure:
                          marker_color=colors_hist, opacity=0.65))
     fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD"],        name="MACD",   line=dict(color="#f0c040", width=1.2)))
     fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD_signal"], name="Signal", line=dict(color="#f08030", width=1.2)))
-    layout = dict(**_CHART_LAYOUT, height=220,
-                  title=dict(text="MACD  (12 / 26 / 9)", font=dict(size=12, color="#64748b"), x=0))
-    fig.update_layout(**layout)
+    fig.update_layout(**_chart_layout(220, "MACD  (12 / 26 / 9)"))
     return fig
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
