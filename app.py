@@ -1335,7 +1335,6 @@ def render_news_tab():
                 unsafe_allow_html=True)
 
     # ── Article cards ─────────────────────────────────────────────────────────
-    cards_html = ""
     for a in filtered[:25]:
         label, color, emoji = sentiment_label(a["compound"])
 
@@ -1363,16 +1362,17 @@ def render_news_tab():
         )
         bar_pct = int(abs(a["compound"]) * 100)
 
-        safe_title   = html.escape(a["title"])
-        safe_summary = html.escape(a["summary"][:200] + ("…" if len(a["summary"]) > 200 else ""))
-        safe_source  = html.escape(a["source"])
+        # Escape all user-supplied text — render each card individually to isolate any bad content
+        safe_title   = html.escape(a["title"][:120])
+        safe_summary = html.escape(a["summary"][:200]) + ("…" if len(a["summary"]) > 200 else "")
+        safe_source  = html.escape(a["source"][:40])
 
-        cards_html += f"""
+        st.markdown(f"""
 <div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.07);border-left:3px solid {color};
      border-radius:12px;padding:16px 18px;margin:8px 0;
      font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif">
   <div style="display:flex;align-items:flex-start;gap:14px">
-    <div style="flex:1;min-width:0">
+    <div style="flex:1;min-width:0;overflow:hidden">
       <div style="font-size:13px;font-weight:600;color:#f5f5f7;line-height:1.45;margin-bottom:6px">
         {safe_title}{mover_badge}
       </div>
@@ -1380,7 +1380,7 @@ def render_news_tab():
         {safe_summary}
       </div>
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
-        <span style="font-size:11px;color:#636366;font-weight:400">{safe_source} · {age_str}</span>
+        <span style="font-size:11px;color:#636366;font-weight:400">{safe_source} &middot; {age_str}</span>
         {tone_badge}{inst_tags}
       </div>
     </div>
@@ -1392,9 +1392,7 @@ def render_news_tab():
       </div>
     </div>
   </div>
-</div>"""
-
-    st.markdown(cards_html, unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
     # ── Economic event reminder ───────────────────────────────────────────────
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
