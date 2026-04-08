@@ -4,3 +4,4 @@ __pycache__/
 .env
 run.py
 .DS_Store
+.streamlit/secrets.toml

@@ -20,23 +20,27 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 _vader = SentimentIntensityAnalyzer()
 
 PT = ZoneInfo("America/Los_Angeles")
-TRADES_FILE  = "/tmp/topstep_trades.json"
-CONFIG_FILE  = "/tmp/topstep_config.json"
+
+# ─── Supabase client (works locally via .streamlit/secrets.toml and on cloud) ──
+def _supa():
+    from supabase import create_client
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
 
 # ─── Notification Config ──────────────────────────────────────────────────────
 def load_config() -> dict:
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
+    try:
+        res = _supa().table("config").select("data").eq("id", "default").execute()
+        if res.data:
+            return res.data[0]["data"]
+    except Exception:
+        pass
     return {"ntfy_topic": "topstepdraco42", "notify_enabled": False, "min_score": 2.5}
 
 def save_config(cfg: dict):
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(cfg, f)
+        _supa().table("config").upsert({"id": "default", "data": cfg}).execute()
     except Exception:
         pass
 
@@ -555,18 +559,22 @@ TICK_INFO = {
 
 # ─── Trade Persistence ────────────────────────────────────────────────────────
 def load_trades() -> list:
-    if os.path.exists(TRADES_FILE):
-        try:
-            with open(TRADES_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
+    try:
+        res = _supa().table("trades").select("data").order("created_at").execute()
+        if res.data:
+            return [row["data"] for row in res.data]
+    except Exception:
+        pass
     return []
 
 def save_trades(trades: list):
     try:
-        with open(TRADES_FILE, "w") as f:
-            json.dump(trades[-200:], f, indent=2)  # keep last 200
+        db = _supa()
+        # Delete all and re-insert (keep last 200)
+        db.table("trades").delete().neq("id", "___none___").execute()
+        rows = [{"id": t["id"], "data": t} for t in trades[-200:]]
+        if rows:
+            db.table("trades").insert(rows).execute()
     except Exception:
         pass
 
