@@ -1270,14 +1270,14 @@ _CHART_LAYOUT = dict(
 def _hline_annotation(fig, y, color, dash, width, label):
     fig.add_hline(
         y=y, line_color=color, line_dash=dash, line_width=width,
-        annotation=dict(
-            text=f"<b>{label}  {y:,.2f}</b>",
-            xref="paper", x=1.0,
-            font=dict(color=color, size=11, family="monospace"),
-            bgcolor="rgba(10,15,26,0.9)", bordercolor=color,
-            borderwidth=1, borderpad=3,
-            showarrow=False, xanchor="left",
-        ),
+        annotation_text=f"<b>{label}  {y:,.2f}</b>",
+        annotation_position="right",
+        annotation_font_color=color,
+        annotation_font_size=11,
+        annotation_bgcolor="rgba(10,15,26,0.9)",
+        annotation_bordercolor=color,
+        annotation_borderwidth=1,
+        annotation_borderpad=3,
     )
 
 def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -> go.Figure:
