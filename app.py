@@ -1232,16 +1232,7 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     # ── record new signal (deduplication via JSON file, not session state) ──
     if should_record_signal(signal, symbol):
-        record_signal(signal, symbol, interval)
-
-    # ── send notification for any active signal (only during optimal sessions) ──
-    notif_key = f"last_notif_{symbol}"
-    if signal["direction"] != "NEUTRAL" and trading_session_active(symbol)[0]:
-        last_notif = st.session_state.get(notif_key, None)
-        now_ts = now_pt()
-        if last_notif is None or (now_ts - last_notif).total_seconds() > 900:
-            send_notification(symbol, signal, TICK_INFO[symbol])
-            st.session_state[notif_key] = now_ts
+        record_signal(signal, symbol, interval)  # record_signal handles the notification
 
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) > 1 else last
@@ -2014,16 +2005,14 @@ def render_dashboard(interval: str, period: str):
             price = sig["price"]
             name = TICK_INFO[symbol]["name"]
 
-            # Record trade + send notification from dashboard so log updates even if user never visits instrument tabs
+            # Close any open trades first (outside cache), then record new signal if conditions met
             full_sig = sig.get("_full")
-            if full_sig and should_record_signal(full_sig, symbol):
-                record_signal(full_sig, symbol, interval)
-            if full_sig and full_sig["direction"] != "NEUTRAL" and trading_session_active(symbol)[0]:
-                notif_key = f"last_notif_{symbol}"
-                last_notif = st.session_state.get(notif_key)
-                if last_notif is None or (now_pt() - last_notif).total_seconds() > 900:
-                    send_notification(symbol, full_sig, TICK_INFO[symbol])
-                    st.session_state[notif_key] = now_pt()
+            if full_sig:
+                _df_live = fetch_data(symbol, interval, period)
+                if not _df_live.empty:
+                    check_open_trades(symbol, _df_live)
+                if should_record_signal(full_sig, symbol):
+                    record_signal(full_sig, symbol, interval)  # record_signal handles the notification
 
             if d == "LONG":
                 bg      = "linear-gradient(135deg,#0d2b1a,#0a1f12)"
