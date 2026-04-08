@@ -1252,10 +1252,17 @@ _CHART_CFG = {
     "modeBarButtonsToRemove": ["lasso2d", "select2d", "toggleSpikelines"],
 }
 
+def _to_pt(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert DataFrame index to Pacific Time for correct chart timestamps."""
+    df = df.copy()
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+    df.index = df.index.tz_convert("America/Los_Angeles")
+    return df
+
 def _chart_layout(height: int, title: str, yaxis_range=None, rangeslider=False) -> dict:
     yaxis = dict(gridcolor="rgba(255,255,255,0.04)", zeroline=False,
-                 tickfont=dict(size=11), side="right",
-                 fixedrange=False)   # allow y-axis drag-to-zoom
+                 tickfont=dict(size=11), side="right", fixedrange=False)
     if yaxis_range:
         yaxis["range"] = yaxis_range
     xaxis = dict(
@@ -1268,15 +1275,20 @@ def _chart_layout(height: int, title: str, yaxis_range=None, rangeslider=False) 
     return dict(
         template="plotly_dark", paper_bgcolor="#0a0f1a", plot_bgcolor="#0a0f1a",
         height=height,
-        margin=dict(l=10, r=120, t=28, b=10),
+        margin=dict(l=10, r=120, t=36, b=10),
         font=dict(size=11, color="#94a3b8"),
         hovermode="x unified",
-        dragmode="zoom",         # drag chart = box zoom, drag y-axis = zoom y
+        dragmode="zoom",
         xaxis=xaxis,
         yaxis=yaxis,
-        legend=dict(orientation="h", y=1.06, x=0,
-                    font=dict(size=11, color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
-        title=dict(text=title, font=dict(size=12, color="#64748b"), x=0),
+        legend=dict(
+            x=0.01, y=0.99, xanchor="left", yanchor="top",
+            orientation="h",
+            bgcolor="rgba(10,15,26,0.75)",
+            bordercolor="rgba(255,255,255,0.08)", borderwidth=1,
+            font=dict(size=10, color="#94a3b8"),
+        ),
+        title=dict(text=title, font=dict(size=11, color="#475569"), x=0),
     )
 
 def _hline_annotation(fig, y, color, dash, width, label):
@@ -1293,7 +1305,7 @@ def _hline_annotation(fig, y, color, dash, width, label):
     )
 
 def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -> go.Figure:
-    plot_df = df.tail(120)
+    plot_df = _to_pt(df.tail(120))
     fig = go.Figure()
 
     fig.add_trace(go.Candlestick(
@@ -1328,7 +1340,7 @@ def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -
     return fig
 
 def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
-    plot_df = df.tail(120)
+    plot_df = _to_pt(df.tail(120))
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["RSI"], name="RSI",
                              line=dict(color="#c084fc", width=1.5), fill="tozeroy",
@@ -1339,7 +1351,7 @@ def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
     return fig
 
 def build_macd_chart(df: pd.DataFrame) -> go.Figure:
-    plot_df = df.tail(120)
+    plot_df = _to_pt(df.tail(120))
     fig = go.Figure()
     colors_hist = ["#26a65b" if v >= 0 else "#e83030" for v in plot_df["MACD_hist"]]
     fig.add_trace(go.Bar(x=plot_df.index, y=plot_df["MACD_hist"], name="Histogram",
