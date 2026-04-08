@@ -1510,6 +1510,18 @@ def render_trade_log():
             dollar_str = f'${abs((t.get("pnl_ticks") or 0) * tick_val):,.0f}' if t.get("pnl_ticks") is not None else "—"
             dollar_color = ticks_color
 
+            # % move from entry to exit level
+            if t.get("pnl_ticks") is not None and t.get("entry") and t["entry"] != 0:
+                tick_sz   = TICK_INFO.get(t["symbol"], {}).get("tick", 0.25)
+                pts_moved = abs(t["pnl_ticks"]) * tick_sz
+                pct_move  = pts_moved / t["entry"] * 100
+                sign      = "+" if (t.get("pnl_ticks") or 0) > 0 else "-"
+                pct_str   = f"{sign}{pct_move:.3f}%"
+                pct_color = ticks_color
+            else:
+                pct_str   = "—"
+                pct_color = "#8e8e93"
+
             try:
                 ts = datetime.fromisoformat(t["timestamp"]).astimezone(PT).strftime("%m/%d  %I:%M %p")
             except Exception:
@@ -1525,6 +1537,7 @@ def render_trade_log():
   <td class="mono" style="color:#30d158">{t['tp1']:,.2f}</td>
   <td class="mono" style="color:#34c759">{t['tp2']:,.2f}</td>
   <td style="color:{ticks_color};font-weight:600">{ticks_str}</td>
+  <td style="color:{pct_color};font-weight:600">{pct_str}</td>
   <td style="color:{dollar_color};font-weight:600">{dollar_str}</td>
   <td>{result_badge}</td>
 </tr>"""
@@ -1541,6 +1554,7 @@ def render_trade_log():
     <th>Target 1</th>
     <th>Target 2</th>
     <th>Ticks</th>
+    <th>% Move</th>
     <th>P&amp;L</th>
     <th>Result</th>
   </tr></thead>
