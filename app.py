@@ -2198,9 +2198,8 @@ def render_dashboard(interval: str, period: str):
     _TV_INTERVALS = {"1m":"1","2m":"2","5m":"5","15m":"15","30m":"30","1h":"60"}
     tv_iv = _TV_INTERVALS.get(interval, "5")
 
-    # Quick-select buttons + custom search
-    # Note: CME futures require TradingView paid plan — using free proxies that track identically
-    qc1, qc2, qc3, qc4 = st.columns([1, 1, 1, 3])
+    # Quick-select buttons — locked to our 3 symbols only
+    qc1, qc2, qc3 = st.columns(3)
     with qc1:
         if st.button("MNQ", use_container_width=True, key="tv_mnq"):
             st.session_state["tv_sym"] = "NASDAQ:QQQ"
@@ -2210,11 +2209,6 @@ def render_dashboard(interval: str, period: str):
     with qc3:
         if st.button("MGC", use_container_width=True, key="tv_mgc"):
             st.session_state["tv_sym"] = "TVC:GOLD"
-    with qc4:
-        custom = st.text_input("Search any symbol", placeholder="e.g. AAPL, BTC, SPY, TSLA",
-                               key="tv_custom", label_visibility="collapsed")
-        if custom:
-            st.session_state["tv_sym"] = custom.upper().strip()
 
     tv_sym = st.session_state.get("tv_sym", "NASDAQ:QQQ")
 
@@ -2238,7 +2232,7 @@ def render_dashboard(interval: str, period: str):
     "hide_legend":       false,
     "save_image":        false,
     "enable_publishing": false,
-    "allow_symbol_change": true,
+    "allow_symbol_change": false,
     "withdateranges":    true
   }});
   </script>
