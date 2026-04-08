@@ -2011,9 +2011,34 @@ def render_dashboard(interval: str, period: str):
     # ── TradingView chart ─────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     st.markdown("### Chart")
-    st.caption("Search any symbol — type it in the top-left of the chart")
+
+    _TV_SYMBOLS = {
+        "MNQ": "CME_MINI:MNQ1!",
+        "MES": "CME_MINI:MES1!",
+        "MGC": "COMEX:MGC1!",
+    }
     _TV_INTERVALS = {"1m":"1","2m":"2","5m":"5","15m":"15","30m":"30","1h":"60"}
     tv_iv = _TV_INTERVALS.get(interval, "5")
+
+    # Quick-select buttons + custom search
+    qc1, qc2, qc3, qc4 = st.columns([1, 1, 1, 3])
+    with qc1:
+        if st.button("MNQ", use_container_width=True, key="tv_mnq"):
+            st.session_state["tv_sym"] = "CME_MINI:MNQ1!"
+    with qc2:
+        if st.button("MES", use_container_width=True, key="tv_mes"):
+            st.session_state["tv_sym"] = "CME_MINI:MES1!"
+    with qc3:
+        if st.button("MGC", use_container_width=True, key="tv_mgc"):
+            st.session_state["tv_sym"] = "COMEX:MGC1!"
+    with qc4:
+        custom = st.text_input("Search any symbol", placeholder="e.g. AAPL, BTC, SPY, ES1!",
+                               key="tv_custom", label_visibility="collapsed")
+        if custom:
+            st.session_state["tv_sym"] = custom.upper().strip()
+
+    tv_sym = st.session_state.get("tv_sym", "CME_MINI:MNQ1!")
+
     components.html(f"""
 <div class="tradingview-widget-container" style="height:560px;width:100%">
   <div id="tv_dash_chart" style="height:100%;width:100%"></div>
@@ -2023,7 +2048,7 @@ def render_dashboard(interval: str, period: str):
     "container_id":      "tv_dash_chart",
     "width":             "100%",
     "height":            560,
-    "symbol":            "CME_MINI:MNQ1!",
+    "symbol":            "{tv_sym}",
     "interval":          "{tv_iv}",
     "timezone":          "America/Los_Angeles",
     "theme":             "dark",
