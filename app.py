@@ -38,7 +38,7 @@ def load_config() -> dict:
             return res.data[0]["data"]
     except Exception:
         pass
-    return {"ntfy_topic": "topstepdraco42", "notify_enabled": False, "min_score": 2.5}
+    return {"ntfy_topic": "topstepdraco42", "notify_enabled": False, "min_score": 3.5}
 
 def save_config(cfg: dict):
     try:
@@ -763,16 +763,35 @@ def save_single_trade(trade: dict):
     except Exception:
         pass
 
+# Minimum score magnitude required to record a signal per symbol
+# Based on trade log analysis: low-score signals have poor win rates
+_MIN_RECORD_SCORE = {
+    "MNQ=F": 3.5,   # off-hours noise heavily impacted MNQ; higher bar needed
+    "MES=F": 2.5,   # 60% WR overall, insufficient data to raise yet
+    "MGC=F": 3.0,   # both MGC losses were score 2.60–2.71; 3.0+ = all wins
+}
+
 def should_record_signal(signal: dict, symbol: str) -> bool:
     """Only record a new signal if:
     - Direction is not NEUTRAL
-    - Currently in an optimal trading session for this symbol
+    - Score clears the per-symbol minimum threshold
+    - Currently in an active trading session for this symbol
     - No open trade already exists for this symbol (max 1 per symbol)
     - Direction changed from last recorded trade
     - At least 15 min since last trade on this symbol
     """
     if signal["direction"] == "NEUTRAL":
         return False
+
+    # Per-symbol score gate — filters out weak signals that historically lose
+    min_score = _MIN_RECORD_SCORE.get(symbol, 2.5)
+    if abs(signal.get("score", 0)) < min_score:
+        return False
+
+    # Session gate — only record during active trading windows
+    if not trading_session_active(symbol)[0]:
+        return False
+
     trades = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
 
