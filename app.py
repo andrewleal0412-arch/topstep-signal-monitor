@@ -1046,12 +1046,22 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
 
     atr   = float(last["ATR"])
     price = float(last["Close"])
+
+    # Adaptive SL multiplier — learned from false stops per symbol
+    sl_mult = 1.5
+    if symbol:
+        try:
+            sl_mult = float(load_config().get("sl_multipliers", {}).get(symbol, 1.5))
+            sl_mult = max(1.0, min(2.5, sl_mult))
+        except Exception:
+            pass
+
     if direction == "LONG":
-        entry, sl = price, round(price - 1.5 * atr, 2)
-        tp1, tp2  = round(price + 1.5 * atr, 2), round(price + 3.0 * atr, 2)
+        entry, sl = price, round(price - sl_mult * atr, 2)
+        tp1, tp2  = round(price + sl_mult * atr, 2), round(price + sl_mult * 2 * atr, 2)
     elif direction == "SHORT":
-        entry, sl = price, round(price + 1.5 * atr, 2)
-        tp1, tp2  = round(price - 1.5 * atr, 2), round(price - 3.0 * atr, 2)
+        entry, sl = price, round(price + sl_mult * atr, 2)
+        tp1, tp2  = round(price - sl_mult * atr, 2), round(price - sl_mult * 2 * atr, 2)
     else:
         entry = sl = tp1 = tp2 = None
 
@@ -1064,6 +1074,7 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
         "ema50": float(last["EMA50"]),
         "vwap":  float(last["VWAP"]),
         "news_adjustment": news_adj,
+        "sl_mult": sl_mult,
     }
 
 # ─── Chart ────────────────────────────────────────────────────────────────────

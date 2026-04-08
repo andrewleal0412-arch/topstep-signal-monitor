@@ -269,16 +269,20 @@ def generate_signal(df: pd.DataFrame, symbol: str, news_sentiment: dict) -> dict
     atr   = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
     entry = float(last["Close"])
 
+    # Adaptive SL multiplier learned from false stops
+    sl_mult = get_sl_multiplier(symbol)
+    sl_mult = max(1.0, min(2.5, sl_mult))
+
     if score >= 2.5:
         direction = "LONG"
-        sl  = entry - atr * 1.5
-        tp1 = entry + atr * 1.5
-        tp2 = entry + atr * 3.0
+        sl  = entry - atr * sl_mult
+        tp1 = entry + atr * sl_mult
+        tp2 = entry + atr * sl_mult * 2
     elif score <= -2.5:
         direction = "SHORT"
-        sl  = entry + atr * 1.5
-        tp1 = entry - atr * 1.5
-        tp2 = entry - atr * 3.0
+        sl  = entry + atr * sl_mult
+        tp1 = entry - atr * sl_mult
+        tp2 = entry - atr * sl_mult * 2
     else:
         return {**empty, "score": round(score, 2)}
 
@@ -427,7 +431,74 @@ def check_open_trades(symbol: str, df: pd.DataFrame):
             save_single_trade(trade)
             result = trade["status"]
             log.info(f"Closed {trade['direction']} {symbol} → {result} ({trade['pnl_ticks']:+.1f} ticks)")
+            # Learn from losses — detect false stops and adapt SL multiplier
+            if result == "loss":
+                analyze_and_adapt(trade, df, symbol)
             break
+
+# ─── Adaptive SL learning ────────────────────────────────────────────────────
+def get_sl_multiplier(symbol: str) -> float:
+    try:
+        return float(load_config().get("sl_multipliers", {}).get(symbol, 1.5))
+    except Exception:
+        return 1.5
+
+def analyze_and_adapt(trade: dict, df: pd.DataFrame, symbol: str):
+    """After a LOSS: check if price reached TP1 in next 30 candles (false stop).
+    Adjust the SL multiplier for this symbol accordingly."""
+    try:
+        closed_at = datetime.fromisoformat(trade["closed_at"])
+        if closed_at.tzinfo is None:
+            closed_at = closed_at.replace(tzinfo=PT)
+        if df.index.tz is not None:
+            closed_at = closed_at.astimezone(df.index.tz)
+            future = df[df.index > closed_at].head(30)
+        else:
+            cut = closed_at.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+            future = df[df.index > cut].head(30)
+
+        if future.empty:
+            return
+
+        d, tp1 = trade["direction"], trade["tp1"]
+        is_false_stop = (future["High"].max() >= tp1 if d == "LONG"
+                         else future["Low"].min() <= tp1)
+
+        cfg = load_config()
+        sl_mults      = cfg.get("sl_multipliers", {})
+        loss_counts   = cfg.get("sl_loss_counts", {})
+        false_counts  = cfg.get("sl_false_counts", {})
+
+        loss_counts[symbol]  = loss_counts.get(symbol, 0) + 1
+        false_counts[symbol] = false_counts.get(symbol, 0) + (1 if is_false_stop else 0)
+
+        n     = loss_counts[symbol]
+        false = false_counts[symbol]
+        current = float(sl_mults.get(symbol, 1.5))
+
+        verdict = "false stop" if is_false_stop else "valid stop"
+        log.info(f"[ADAPT] {TICK_INFO[symbol]['name']} {verdict} | "
+                 f"false stops: {false}/{n} | SL mult: {current:.2f}")
+
+        if n >= 10:
+            rate = false / n
+            if rate > 0.40:
+                sl_mults[symbol] = round(min(2.5, current + 0.10), 2)
+                log.info(f"[ADAPT] {symbol} SL widened → {sl_mults[symbol]:.2f}")
+            elif rate < 0.15:
+                sl_mults[symbol] = round(max(1.0, current - 0.05), 2)
+                log.info(f"[ADAPT] {symbol} SL tightened → {sl_mults[symbol]:.2f}")
+            # Reset counters after adjustment evaluation
+            loss_counts[symbol]  = 0
+            false_counts[symbol] = 0
+
+        cfg["sl_multipliers"] = sl_mults
+        cfg["sl_loss_counts"] = loss_counts
+        cfg["sl_false_counts"] = false_counts
+        db().table("config").upsert({"id": "default", "data": cfg}).execute()
+
+    except Exception as e:
+        log.error(f"analyze_and_adapt error: {e}")
 
 # ─── Notification cooldown (in-memory) ───────────────────────────────────────
 _last_notif: dict = {}
