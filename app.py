@@ -1455,40 +1455,54 @@ def render_news_tab():
     st.markdown(f"<div style='color:#8e8e93;font-size:12px;margin:8px 0'>{len(filtered)} articles</div>",
                 unsafe_allow_html=True)
 
-    # ── Article cards — use native Streamlit for all user text (no HTML injection) ──
+    # ── Article cards ─────────────────────────────────────────────────────────
+    cards_html = ""
     for a in filtered[:25]:
         label, color, emoji = sentiment_label(a["compound"])
 
-        if a["age_min"] < 60:
-            age_str = f"{int(a['age_min'])}m ago"
-        elif a["age_min"] < 1440:
-            age_str = f"{int(a['age_min']/60)}h ago"
+        age_min = max(0, a["age_min"])  # clamp negative (future-dated RSS items)
+        if age_min < 60:
+            age_str = f"{int(age_min)}m ago" if age_min >= 1 else "just now"
+        elif age_min < 1440:
+            age_str = f"{int(age_min/60)}h ago"
         else:
-            age_str = f"{int(a['age_min']/1440)}d ago"
+            age_str = f"{int(age_min/1440)}d ago"
 
-        tag_map  = {"nasdaq": "MNQ/NQ", "sp500": "MES/ES", "gold": "GC/MGC", "macro": "ALL"}
-        tags_str = "  ·  ".join(tag_map[g] for g in a["groups"] if g in tag_map)
-        mover    = "  ⚡ MARKET MOVER" if a["high_impact"] else ""
-        summary  = a["summary"][:200] + ("…" if len(a["summary"]) > 200 else "")
+        tag_map  = {"nasdaq": "MNQ", "sp500": "MES", "gold": "MGC", "macro": "ALL"}
+        tags_str = " · ".join(tag_map[g] for g in a["groups"] if g in tag_map)
+        mover_html = '&nbsp;<span style="color:#fbbf24;font-size:10px;font-weight:700">⚡ MOVER</span>' if a["high_impact"] else ""
 
-        # Colored left border via a thin div, then native components for all text
-        st.markdown(
-            f'<div style="border-left:3px solid {color};border-radius:2px;'
-            f'margin:2px 0 0 0;height:4px"></div>',
-            unsafe_allow_html=True
-        )
-        with st.container():
-            c1, c2 = st.columns([6, 1])
-            with c1:
-                st.markdown(f"**{a['title']}{mover}**")
-                st.caption(summary)
-                meta = f"{a['source']} · {age_str}"
-                if tags_str:
-                    meta += f"  ·  {tags_str}"
-                st.caption(f"{label}  ·  {meta}")
-            with c2:
-                st.metric("", f"{a['compound']:+.2f}")
-        st.divider()
+        # Safely escape user-supplied text before embedding in HTML
+        title_s   = html.escape(a["title"])
+        summary_s = html.escape(a["summary"][:200]) + ("…" if len(a["summary"]) > 200 else "")
+        source_s  = html.escape(a["source"])
+
+        score_str = f"{a['compound']:+.2f}"
+
+        meta_parts = [source_s, age_str]
+        if tags_str:
+            meta_parts.append(tags_str)
+        meta_html = " &nbsp;·&nbsp; ".join(meta_parts)
+
+        cards_html += f"""
+<div style="display:flex;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+  <div style="width:3px;min-height:60px;background:{color};border-radius:2px;flex-shrink:0"></div>
+  <div style="flex:1;min-width:0">
+    <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#f1f5f9;
+         line-height:1.45;margin-bottom:5px">{title_s}{mover_html}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:12px;color:#64748b;
+         line-height:1.5;margin-bottom:6px">{summary_s}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:11px;color:#475569">
+      <span style="color:{color}">{label}</span> &nbsp;·&nbsp; {meta_html}
+    </div>
+  </div>
+  <div style="flex-shrink:0;text-align:right;min-width:48px">
+    <div style="font-family:'Inter',sans-serif;font-size:15px;font-weight:700;color:{color}">{score_str}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:10px;color:#475569;margin-top:2px;letter-spacing:0.04em">score</div>
+  </div>
+</div>"""
+
+    st.markdown(f'<div style="margin-top:4px">{cards_html}</div>', unsafe_allow_html=True)
 
     # ── Economic event reminder ───────────────────────────────────────────────
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
