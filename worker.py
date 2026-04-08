@@ -257,7 +257,7 @@ def get_htf_bias(df: pd.DataFrame) -> int:
     return 0
 
 # ─── Signal Engine ────────────────────────────────────────────────────────────
-def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias: int = 0) -> dict:
+def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int = 0, htf_bias_1h: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
              "entry": None, "sl": None, "tp1": None, "tp2": None, "atr": 0}
     if len(df) < 50:
@@ -298,12 +298,20 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias: int = 0) 
     # News
     score += ns.get("adjustment", 0)
 
-    # Higher timeframe (15m) trend filter
-    if htf_bias == 1:
-        if score > 0:  score += 1.0   # aligned LONG
+    # 1h trend filter (macro — highest weight)
+    if htf_bias_1h == 1:
+        if score > 0:   score += 1.5  # aligned LONG
+        elif score < 0: score += 2.0  # counter-trend SHORT heavily penalized
+    elif htf_bias_1h == -1:
+        if score < 0:   score -= 1.5  # aligned SHORT
+        elif score > 0: score -= 2.0  # counter-trend LONG heavily penalized
+
+    # 15m trend filter (intermediate)
+    if htf_bias_15m == 1:
+        if score > 0:   score += 1.0  # aligned LONG
         elif score < 0: score += 1.5  # counter-trend SHORT weakened
-    elif htf_bias == -1:
-        if score < 0:  score -= 1.0   # aligned SHORT
+    elif htf_bias_15m == -1:
+        if score < 0:   score -= 1.0  # aligned SHORT
         elif score > 0: score -= 1.5  # counter-trend LONG weakened
 
     score  = round(score, 2)
@@ -482,16 +490,22 @@ def run_once():
                 continue
             df = compute_indicators(df)
 
-            # Higher timeframe confirmation — fetch 15m separately
+            # Higher timeframe confirmation — 15m (intermediate) + 1h (macro)
             time.sleep(5)
-            df_15m   = fetch_data(symbol, "15m", "60d")
-            df_15m   = compute_indicators(df_15m) if not df_15m.empty else df_15m
-            htf_bias = get_htf_bias(df_15m) if not df_15m.empty else 0
+            df_15m       = fetch_data(symbol, "15m", "60d")
+            df_15m       = compute_indicators(df_15m) if not df_15m.empty else df_15m
+            htf_bias_15m = get_htf_bias(df_15m) if not df_15m.empty else 0
+
+            time.sleep(5)
+            df_1h        = fetch_data(symbol, "1h", "730d")
+            df_1h        = compute_indicators(df_1h) if not df_1h.empty else df_1h
+            htf_bias_1h  = get_htf_bias(df_1h) if not df_1h.empty else 0
 
             ns  = get_news_sentiment(symbol, articles)
-            sig = generate_signal(df, symbol, ns, htf_bias=htf_bias)
+            sig = generate_signal(df, symbol, ns, htf_bias_15m=htf_bias_15m, htf_bias_1h=htf_bias_1h)
 
-            log.info(f"{TICK_INFO[symbol]['name']}  {sig['direction']:7}  score={sig['score']:+.2f}  htf={'BUL' if htf_bias==1 else 'BEA' if htf_bias==-1 else 'NEU'}")
+            def _bl(b): return "BUL" if b == 1 else "BEA" if b == -1 else "NEU"
+            log.info(f"{TICK_INFO[symbol]['name']}  {sig['direction']:7}  score={sig['score']:+.2f}  1h={_bl(htf_bias_1h)}  15m={_bl(htf_bias_15m)}")
 
             # Always check open trades first
             check_open_trades(symbol, df)

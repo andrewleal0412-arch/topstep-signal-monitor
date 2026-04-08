@@ -1099,7 +1099,7 @@ def get_htf_bias(df: pd.DataFrame) -> int:
     return 0
 
 # ─── Signal Engine ────────────────────────────────────────────────────────────
-def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None, htf_bias: int = 0) -> dict:
+def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None, htf_bias_15m: int = 0, htf_bias_1h: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
              "entry": None, "sl": None, "tp1": None, "tp2": None, "atr": 0,
              "price": 0, "rsi": 50, "ema9": 0, "ema21": 0, "ema50": 0, "vwap": 0,
@@ -1171,15 +1171,31 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
             reasons.append(("bull" if news_adj >= 0 else "bear",
                             f"📰 News is mixed — small influence on signal ({ns_count} articles, {ns_score:+.2f})"))
 
-    # ── Higher timeframe (15m) trend filter ──────────────────────────────────
-    if htf_bias == 1:
+    # ── 1h trend filter (macro — highest weight) ─────────────────────────────
+    if htf_bias_1h == 1:
+        if score > 0:
+            score += 1.5
+            reasons.append(("bull", "✅ 1h trend confirms bullish — strong macro alignment"))
+        elif score < 0:
+            score += 2.0
+            reasons.append(("bear", "⚠ 1h trend is bullish — counter-trend SHORT heavily penalized"))
+    elif htf_bias_1h == -1:
+        if score < 0:
+            score -= 1.5
+            reasons.append(("bear", "✅ 1h trend confirms bearish — strong macro alignment"))
+        elif score > 0:
+            score -= 2.0
+            reasons.append(("bull", "⚠ 1h trend is bearish — counter-trend LONG heavily penalized"))
+
+    # ── 15m trend filter (intermediate) ──────────────────────────────────────
+    if htf_bias_15m == 1:
         if score > 0:
             score += 1.0
             reasons.append(("bull", "✅ 15m trend confirms bullish — aligned LONG signal"))
         elif score < 0:
             score += 1.5
             reasons.append(("bear", "⚠ 15m trend is bullish — counter-trend SHORT weakened"))
-    elif htf_bias == -1:
+    elif htf_bias_15m == -1:
         if score < 0:
             score -= 1.0
             reasons.append(("bear", "✅ 15m trend confirms bearish — aligned SHORT signal"))
@@ -1357,14 +1373,18 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     df = compute_indicators(df)
 
-    # Higher timeframe (15m) bias for trend confirmation
-    df_15m   = fetch_data(symbol, "15m", "60d")
-    df_15m   = compute_indicators(df_15m) if not df_15m.empty else df_15m
-    htf_bias = get_htf_bias(df_15m) if not df_15m.empty else 0
+    # Higher timeframe bias — 15m (intermediate) + 1h (macro)
+    df_15m        = fetch_data(symbol, "15m", "60d")
+    df_15m        = compute_indicators(df_15m) if not df_15m.empty else df_15m
+    htf_bias_15m  = get_htf_bias(df_15m) if not df_15m.empty else 0
+
+    df_1h         = fetch_data(symbol, "1h", "730d")
+    df_1h         = compute_indicators(df_1h) if not df_1h.empty else df_1h
+    htf_bias_1h   = get_htf_bias(df_1h) if not df_1h.empty else 0
 
     articles        = fetch_news()
     news_sentiment  = get_news_sentiment(symbol, articles)
-    signal          = generate_signal(df, symbol, news_sentiment, htf_bias=htf_bias)
+    signal          = generate_signal(df, symbol, news_sentiment, htf_bias_15m=htf_bias_15m, htf_bias_1h=htf_bias_1h)
 
     # ── check / update open trades ──
     trades = check_open_trades(symbol, df)
@@ -2133,19 +2153,25 @@ def _quick_signal(symbol: str, interval: str, period: str) -> dict:
             return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None}
         df = compute_indicators(df)
 
-        # Higher timeframe (15m) bias
-        df_15m   = fetch_data(symbol, "15m", "60d")
-        df_15m   = compute_indicators(df_15m) if not df_15m.empty else df_15m
-        htf_bias = get_htf_bias(df_15m) if not df_15m.empty else 0
+        # Higher timeframe bias — 15m (intermediate) + 1h (macro)
+        df_15m       = fetch_data(symbol, "15m", "60d")
+        df_15m       = compute_indicators(df_15m) if not df_15m.empty else df_15m
+        htf_bias_15m = get_htf_bias(df_15m) if not df_15m.empty else 0
+
+        df_1h        = fetch_data(symbol, "1h", "730d")
+        df_1h        = compute_indicators(df_1h) if not df_1h.empty else df_1h
+        htf_bias_1h  = get_htf_bias(df_1h) if not df_1h.empty else 0
 
         articles       = fetch_news()
         news_sentiment = get_news_sentiment(symbol, articles)
-        sig            = generate_signal(df, symbol, news_sentiment, htf_bias=htf_bias)
+        sig            = generate_signal(df, symbol, news_sentiment, htf_bias_15m=htf_bias_15m, htf_bias_1h=htf_bias_1h)
         check_open_trades(symbol, df)
         price = float(df.iloc[-1]["Close"])
-        return {"direction": sig["direction"], "score": sig["score"], "price": price, "_full": sig, "htf_bias": htf_bias}
+        return {"direction": sig["direction"], "score": sig["score"], "price": price, "_full": sig,
+                "htf_bias_15m": htf_bias_15m, "htf_bias_1h": htf_bias_1h}
     except Exception:
-        return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None, "htf_bias": 0}
+        return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None,
+                "htf_bias_15m": 0, "htf_bias_1h": 0}
 
 def render_dashboard(interval: str, period: str):
     st.markdown("### Market Overview")
@@ -2209,16 +2235,25 @@ def render_dashboard(interval: str, period: str):
                     'color:#fbbf24">⏸ PAUSED</div>'
                 )
 
-            htf = sig.get("htf_bias", 0)
-            if htf == 1:
-                htf_badge = ('<div style="margin-top:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;'
-                             'color:#30d158">▲ 15m BULLISH</div>')
-            elif htf == -1:
-                htf_badge = ('<div style="margin-top:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;'
-                             'color:#ff375f">▼ 15m BEARISH</div>')
-            else:
-                htf_badge = ('<div style="margin-top:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;'
-                             'color:#636366">— 15m NEUTRAL</div>')
+            def _bias_pill(label: str, bias: int) -> str:
+                if bias == 1:
+                    return (f'<span style="font-size:9px;font-weight:700;letter-spacing:0.05em;'
+                            f'color:#30d158">▲ {label}</span>')
+                elif bias == -1:
+                    return (f'<span style="font-size:9px;font-weight:700;letter-spacing:0.05em;'
+                            f'color:#ff375f">▼ {label}</span>')
+                else:
+                    return (f'<span style="font-size:9px;font-weight:700;letter-spacing:0.05em;'
+                            f'color:#636366">— {label}</span>')
+
+            b15 = sig.get("htf_bias_15m", 0)
+            b1h = sig.get("htf_bias_1h",  0)
+            htf_badge = (
+                f'<div style="margin-top:6px;display:flex;justify-content:center;gap:10px">'
+                f'{_bias_pill("1h", b1h)}'
+                f'{_bias_pill("15m", b15)}'
+                f'</div>'
+            )
 
             with col:
                 st.markdown(f"""
