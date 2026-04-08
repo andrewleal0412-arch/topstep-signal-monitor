@@ -348,7 +348,7 @@ section.main > div { background: #080c14 !important; }
     flex-direction: column;
     justify-content: space-between;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
 }
 .mc::before {
     content: '';
