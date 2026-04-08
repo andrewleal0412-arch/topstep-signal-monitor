@@ -359,23 +359,19 @@ def trading_session_active(symbol: str) -> bool:
 def check_open_trades(symbol: str, df: pd.DataFrame):
     trades      = load_trades()
     open_trades = [t for t in trades if t["status"] == "open" and t["symbol"] == symbol]
-    if not open_trades or df.empty:
+    if not open_trades:
         return
 
-    # Always fetch max history so old open trades aren't stuck
+    # Always use 1m candles for TP/SL — catches every wick, most precise
     try:
-        spacing_min = (df.index[-1] - df.index[-2]).total_seconds() / 60
-        if   spacing_min <= 1:  iv = "1m"
-        elif spacing_min <= 2:  iv = "2m"
-        elif spacing_min <= 5:  iv = "5m"
-        elif spacing_min <= 15: iv = "15m"
-        elif spacing_min <= 30: iv = "30m"
-        else:                   iv = "1h"
-        ext = fetch_data(symbol, iv, _MAX_PERIOD.get(iv, "60d"))
-        if not ext.empty and len(ext) > len(df):
-            df = ext
+        df_1m = fetch_data(symbol, "1m", "7d")
+        if not df_1m.empty:
+            df = df_1m
     except Exception:
         pass
+
+    if df.empty:
+        return
 
     ti_sz = TICK_INFO[symbol]["tick"]
 
