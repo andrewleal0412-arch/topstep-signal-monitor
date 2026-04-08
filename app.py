@@ -1304,8 +1304,16 @@ def _hline_annotation(fig, y, color, dash, width, label):
         annotation_borderpad=3,
     )
 
-def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -> go.Figure:
+def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None, y_zoom: float = 1.0) -> go.Figure:
     plot_df = _to_pt(df.tail(120))
+
+    # Y-axis range: zoom in (smaller number) = tighter range, zoom out = wider
+    hi     = float(plot_df["High"].max())
+    lo     = float(plot_df["Low"].min())
+    mid    = (hi + lo) / 2
+    half   = (hi - lo) / 2 * y_zoom
+    y_range = [mid - half, mid + half]
+
     fig = go.Figure()
 
     fig.add_trace(go.Candlestick(
@@ -1336,7 +1344,8 @@ def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -
         _hline_annotation(fig, lvls["tp1"],   "#26a65b",   "dash",  1.5, "TP1  ")
         _hline_annotation(fig, lvls["tp2"],   "#34d399",   "dot",   1.2, "TP2  ")
 
-    fig.update_layout(**_chart_layout(560, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB", rangeslider=True))
+    fig.update_layout(**_chart_layout(560, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB",
+                                      yaxis_range=y_range, rangeslider=True))
     return fig
 
 def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
@@ -1635,7 +1644,12 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    st.plotly_chart(build_price_chart(df, signal, open_trade=open_trade),
+    y_zoom = st.slider(
+        "Y-axis zoom", min_value=0.2, max_value=3.0, value=1.0, step=0.05,
+        format="%.2fx", key=f"yzoom_{symbol}",
+        help="Slide left to zoom in on price, right to zoom out"
+    )
+    st.plotly_chart(build_price_chart(df, signal, open_trade=open_trade, y_zoom=y_zoom),
                     use_container_width=True, config=_CHART_CFG)
     st.plotly_chart(build_rsi_chart(df),  use_container_width=True, config=_CHART_CFG)
     st.plotly_chart(build_macd_chart(df), use_container_width=True, config=_CHART_CFG)
