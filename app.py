@@ -2509,7 +2509,6 @@ def main():
     interval   = st.session_state.get("tf", "5m")
     period     = period_map.get(interval, "60d")
 
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
     st.divider()
 
     tab_home, tab_mnq, tab_mes, tab_mgc, tab_news, tab_log, tab_settings = st.tabs([
