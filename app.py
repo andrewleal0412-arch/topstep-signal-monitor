@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -11,6 +12,7 @@ import time
 import json
 import uuid
 import os
+import hashlib
 import requests
 import feedparser
 import re
@@ -2010,7 +2012,67 @@ def render_dashboard(interval: str, period: str):
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+def _auth_token() -> str:
+    pw = st.secrets.get("app_password", "topstep2024")
+    return hashlib.sha256(pw.encode()).hexdigest()[:28]
+
+def check_auth() -> bool:
+    tok = _auth_token()
+
+    # Auto-auth from query param (set by remember-me on previous visit)
+    if st.query_params.get("auth") == tok:
+        st.session_state["_auth"] = True
+
+    # First load with no session: inject JS to read localStorage and redirect
+    if not st.session_state.get("_auth") and not st.session_state.get("_ls_read"):
+        st.session_state["_ls_read"] = True
+        components.html(f"""<script>
+        var t = localStorage.getItem('ts_auth');
+        if (t === '{tok}') {{
+            var u = new URL(window.parent.location.href);
+            u.searchParams.set('auth', t);
+            window.parent.location.replace(u.toString());
+        }}
+        </script>""", height=0)
+
+    if st.session_state.get("_auth"):
+        return True
+
+    # ── Login form ────────────────────────────────────────────────────────────
+    st.markdown(f"""
+<div style="max-width:380px;margin:80px auto;font-family:'Inter',sans-serif">
+  <div style="font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:6px">TopStep Signal Monitor</div>
+  <div style="font-size:13px;color:#64748b;margin-bottom:28px">Enter your password to continue</div>
+</div>""", unsafe_allow_html=True)
+
+    col, _ = st.columns([1.4, 1])
+    with col:
+        pw      = st.text_input("Password", type="password", placeholder="Enter password", key="_pw", label_visibility="collapsed")
+        remember = st.checkbox("Remember me on this browser", value=True, key="_remember")
+
+        if st.button("Log in", use_container_width=True, type="primary"):
+            if hashlib.sha256(pw.encode()).hexdigest()[:28] == tok:
+                st.session_state["_auth"] = True
+                if remember:
+                    # Save to localStorage AND update URL so next visit auto-auths
+                    components.html(f"""<script>
+                    localStorage.setItem('ts_auth', '{tok}');
+                    var u = new URL(window.parent.location.href);
+                    u.searchParams.set('auth', '{tok}');
+                    window.parent.location.replace(u.toString());
+                    </script>""", height=0)
+                else:
+                    st.rerun()
+            else:
+                st.error("Incorrect password")
+    return False
+
+
 def main():
+    if not check_auth():
+        st.stop()
+
     st.markdown(f"## TopStep Signal Monitor")
     st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
