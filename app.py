@@ -512,8 +512,8 @@ section.main > div { background: #080c14 !important; }
 .badge-win1  { background: rgba(52,211,153,0.08);  color: #34d399; border: 1px solid rgba(52,211,153,0.15); }
 .badge-loss  { background: rgba(248,113,113,0.12);  color: #f87171; border: 1px solid rgba(248,113,113,0.2); }
 .badge-open  { background: rgba(251,191,36,0.1);   color: #fbbf24; border: 1px solid rgba(251,191,36,0.2); }
-.badge-long  { background: rgba(129,140,248,0.12);  color: #818cf8; border: 1px solid rgba(129,140,248,0.2); }
-.badge-short { background: rgba(192,132,252,0.12);  color: #c084fc; border: 1px solid rgba(192,132,252,0.2); }
+.badge-long  { background: rgba(48,209,88,0.15);   color: #30d158; border: 1px solid rgba(48,209,88,0.35); }
+.badge-short { background: rgba(255,55,95,0.15);   color: #ff375f; border: 1px solid rgba(255,55,95,0.35); }
 
 /* ── Tooltips ── */
 .tt {
