@@ -563,9 +563,10 @@ def load_trades() -> list:
         res = _supa().table("trades").select("data").order("created_at").execute()
         if res.data:
             return [row["data"] for row in res.data]
-    except Exception:
-        pass
-    return []
+        return []
+    except Exception as e:
+        st.session_state["_db_error"] = str(e)
+        return []
 
 def save_trades(trades: list):
     try:
@@ -1400,6 +1401,11 @@ def render_news_tab():
 # ─── Trade Log Tab ────────────────────────────────────────────────────────────
 def render_trade_log():
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # Show DB error if any
+    if "_db_error" in st.session_state:
+        st.error(f"Database error: {st.session_state['_db_error']}")
+
     all_trades = load_trades()
 
     if not all_trades:
