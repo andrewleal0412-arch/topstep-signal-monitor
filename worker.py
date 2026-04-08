@@ -320,8 +320,6 @@ def trading_session_active(symbol: str) -> bool:
 def should_record(signal: dict, symbol: str) -> bool:
     if signal["direction"] == "NEUTRAL":
         return False
-    if not trading_session_active(symbol):
-        return False
     trades     = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
     # Max 1 open trade per symbol at a time
@@ -362,8 +360,9 @@ def record_signal(signal: dict, symbol: str) -> dict:
     }
     save_single_trade(trade)
     log.info(f"Recorded {signal['direction']} on {symbol} | score {signal['score']:+.1f}")
-    # Notify with exact saved trade values so TP numbers match the log
-    send_notification(symbol, trade)
+    # Only notify during active sessions — always log regardless
+    if trading_session_active(symbol):
+        send_notification(symbol, trade)
     return trade
 
 def check_open_trades(symbol: str, df: pd.DataFrame):

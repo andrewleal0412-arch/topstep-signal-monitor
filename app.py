@@ -755,9 +755,6 @@ def should_record_signal(signal: dict, symbol: str) -> bool:
     """
     if signal["direction"] == "NEUTRAL":
         return False
-    active, _, _ = trading_session_active(symbol)
-    if not active:
-        return False
     trades = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
 
@@ -801,8 +798,9 @@ def record_signal(signal: dict, symbol: str, interval: str) -> dict:
         "pnl_ticks": None,
     }
     save_single_trade(trade)
-    # Send notification using exact saved trade values so TP numbers always match the log
-    send_notification(symbol, trade, TICK_INFO[symbol])
+    # Only notify during active trading sessions — always log regardless
+    if trading_session_active(symbol)[0]:
+        send_notification(symbol, trade, TICK_INFO[symbol])
     return trade
 
 _MAX_PERIOD = {"1m": "7d", "2m": "60d", "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d"}
