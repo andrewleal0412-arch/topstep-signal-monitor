@@ -1,0 +1,8 @@
+yfinance>=0.2.40
+pandas>=2.0.0
+numpy>=1.26.0
+ta>=0.11.0
+requests>=2.31.0
+feedparser>=6.0.11
+vaderSentiment>=3.3.2
+supabase>=2.4.0
