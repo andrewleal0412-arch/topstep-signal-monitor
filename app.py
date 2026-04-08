@@ -1,0 +1,1735 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import ta
+import time
+import json
+import uuid
+import os
+import requests
+import feedparser
+import re
+import html
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+_vader = SentimentIntensityAnalyzer()
+
+PT = ZoneInfo("America/Los_Angeles")
+TRADES_FILE  = "/tmp/topstep_trades.json"
+CONFIG_FILE  = "/tmp/topstep_config.json"
+
+# ─── Notification Config ──────────────────────────────────────────────────────
+def load_config() -> dict:
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"ntfy_topic": "topstepdraco42", "notify_enabled": False, "min_score": 2.5}
+
+def save_config(cfg: dict):
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
+
+def send_notification(symbol: str, signal: dict, ti: dict):
+    cfg = load_config()
+    if not cfg.get("notify_enabled") or not cfg.get("ntfy_topic", "").strip():
+        return
+
+    topic   = cfg["ntfy_topic"].strip()
+    score   = signal["score"]
+    min_sc  = cfg.get("min_score", 2.5)
+
+    if abs(score) < min_sc:
+        return
+
+    d       = signal["direction"]
+    name    = ti["name"]
+    icon    = "📈" if d == "LONG" else "📉"
+    strength = int(abs(score) / 6.0 * 100)
+    tick_sz  = ti["tick"]
+    sl_ticks = abs(signal["entry"] - signal["sl"])  / tick_sz
+    tp1_ticks= abs(signal["entry"] - signal["tp1"]) / tick_sz
+
+    title = f"{icon} {d} - {name}  |  Score {score:+.1f}  ({strength}% strength)"
+    body  = (
+        f"Entry:  {signal['entry']:,.2f}\n"
+        f"Stop:   {signal['sl']:,.2f}  ({sl_ticks:.0f} ticks)\n"
+        f"TP1:    {signal['tp1']:,.2f}  ({tp1_ticks:.0f} ticks)\n"
+        f"TP2:    {signal['tp2']:,.2f}\n"
+        f"Time:   {now_pt().strftime('%I:%M %p PT')}"
+    )
+
+    priority = "urgent" if abs(score) >= 4.5 else "high" if abs(score) >= 3.5 else "default"
+    tags     = "chart_with_upwards_trend" if d == "LONG" else "chart_with_downwards_trend"
+
+    try:
+        requests.post(
+            f"https://ntfy.sh/{topic}",
+            data=body.encode("utf-8"),
+            headers={
+                "Title":    title,
+                "Priority": priority,
+                "Tags":     tags,
+            },
+            timeout=5,
+        )
+    except Exception:
+        pass  # never crash the app if notification fails
+
+def now_pt() -> datetime:
+    return datetime.now(PT)
+
+# ─── News Engine ──────────────────────────────────────────────────────────────
+
+NEWS_FEEDS = [
+    ("Yahoo Finance",  "https://finance.yahoo.com/news/rssindex"),
+    ("Reuters",        "https://feeds.reuters.com/reuters/businessNews"),
+    ("CNBC",           "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+    ("MarketWatch",    "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines"),
+    ("Investing.com",  "https://www.investing.com/rss/news.rss"),
+]
+
+# Keywords that make an article relevant to each instrument group
+INSTRUMENT_KEYWORDS = {
+    "nasdaq": ["nasdaq", "tech", "technology", "apple", "aapl", "nvidia", "nvda",
+               "microsoft", "msft", "meta", "amazon", "amzn", "alphabet", "google",
+               "growth stocks", "mnq", "nq", "qqq"],
+    "sp500":  ["s&p", "sp500", "s&p 500", "dow", "russell", "equities", "stocks",
+               "wall street", "mes", "es", "spy", "market rally", "market selloff"],
+    "gold":   ["gold", "xau", "precious metal", "safe haven", "bullion",
+               "gc", "mgc", "silver", "commodities"],
+    "macro":  ["fed", "federal reserve", "fomc", "interest rate", "rate hike", "rate cut",
+               "inflation", "cpi", "pce", "nfp", "jobs report", "gdp", "recession",
+               "jerome powell", "treasury", "yield", "dollar", "dxy", "debt ceiling",
+               "banking crisis", "tariff", "trade war", "geopolitical", "ukraine",
+               "china", "earnings"],
+}
+
+# Symbol -> which keyword groups are relevant
+SYMBOL_GROUPS = {
+    "MNQ=F": ["nasdaq", "macro"],
+    "NQ=F":  ["nasdaq", "macro"],
+    "MES=F": ["sp500",  "macro"],
+    "ES=F":  ["sp500",  "macro"],
+    "GC=F":  ["gold",   "macro"],
+    "MGC=F": ["gold",   "macro"],
+}
+
+# Economic calendar — recurring high-impact events (weekday 0=Mon, day_of_month)
+ECON_EVENTS = [
+    {"name": "CPI Report",          "desc": "Inflation data. Hot CPI = bearish stocks, bullish gold. Cold CPI = bullish stocks.", "impact": "HIGH"},
+    {"name": "FOMC Meeting",         "desc": "Fed interest rate decision. Rate hikes hurt stocks & gold. Cuts help both.",         "impact": "HIGH"},
+    {"name": "Non-Farm Payrolls",    "desc": "Jobs report (1st Friday of month). Strong jobs = bearish for rate cuts.",             "impact": "HIGH"},
+    {"name": "GDP Report",           "desc": "Economic growth. Strong GDP = bullish stocks. Weak = bearish.",                      "impact": "HIGH"},
+    {"name": "PCE Inflation",        "desc": "Fed's preferred inflation gauge. Similar impact to CPI.",                             "impact": "HIGH"},
+    {"name": "Initial Jobless Claims","desc": "Weekly Thursday release. High claims = economic weakness.",                          "impact": "MED"},
+    {"name": "PPI Report",           "desc": "Producer prices — leading indicator for CPI.",                                        "impact": "MED"},
+    {"name": "Retail Sales",         "desc": "Consumer spending strength. Big miss = bearish.",                                     "impact": "MED"},
+    {"name": "FOMC Minutes",         "desc": "Released 3 weeks after FOMC — shows Fed's internal debate.",                          "impact": "MED"},
+]
+
+@st.cache_data(ttl=300)  # refresh news every 5 minutes
+def fetch_news() -> list:
+    """Pull headlines from RSS feeds and score them with VADER sentiment."""
+    articles = []
+    seen = set()
+
+    for source, url in NEWS_FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:15]:
+                title   = entry.get("title", "").strip()
+                summary = entry.get("summary", entry.get("description", "")).strip()
+                link    = entry.get("link", "")
+
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+
+                # Strip HTML: two passes (some feeds double-encode tags)
+                summary_clean = re.sub(r"<[^>]+>", " ", summary)
+                summary_clean = html.unescape(summary_clean)
+                summary_clean = re.sub(r"<[^>]+>", " ", summary_clean)  # second pass after unescape
+                summary_clean = re.sub(r"\s+", " ", summary_clean).strip()[:300]
+
+                text = f"{title}. {summary_clean}"
+
+                # VADER sentiment
+                vs   = _vader.polarity_scores(text)
+                compound = vs["compound"]  # -1.0 (very bearish) to +1.0 (very bullish)
+
+                # Determine which instruments this article is relevant to
+                text_lower = text.lower()
+                relevant_groups = []
+                for group, kws in INSTRUMENT_KEYWORDS.items():
+                    if any(kw in text_lower for kw in kws):
+                        relevant_groups.append(group)
+
+                # High-impact flag
+                high_impact = any(kw in text_lower for kw in
+                                  ["fed", "fomc", "cpi", "nfp", "gdp", "rate", "inflation", "recession",
+                                   "tariff", "crash", "crisis", "emergency"])
+
+                # Parse publish time
+                try:
+                    pub = datetime(*entry.published_parsed[:6], tzinfo=PT)
+                    age_min = (now_pt() - pub).total_seconds() / 60
+                except Exception:
+                    pub = now_pt()
+                    age_min = 999
+
+                articles.append({
+                    "title":     title,
+                    "summary":   summary_clean,
+                    "source":    source,
+                    "link":      link,
+                    "compound":  compound,
+                    "pos":       vs["pos"],
+                    "neg":       vs["neg"],
+                    "groups":    relevant_groups,
+                    "high_impact": high_impact,
+                    "pub":       pub,
+                    "age_min":   age_min,
+                })
+        except Exception:
+            continue
+
+    # Sort by time, newest first
+    articles.sort(key=lambda x: x["age_min"])
+    return articles[:60]
+
+def get_news_sentiment(symbol: str, articles: list) -> dict:
+    """
+    Aggregate news sentiment for a given symbol.
+    Returns a dict with score (-1 to +1), label, articles list, and signal adjustment.
+    """
+    groups = SYMBOL_GROUPS.get(symbol, ["macro"])
+    relevant = [a for a in articles if any(g in a["groups"] for g in groups)]
+
+    if not relevant:
+        return {"score": 0.0, "label": "Neutral", "color": "#8e8e93",
+                "adjustment": 0.0, "articles": [], "count": 0}
+
+    # Weight recent articles more heavily, high-impact articles 2x
+    weights, scores = [], []
+    for a in relevant[:20]:
+        age_weight   = max(0.1, 1.0 - a["age_min"] / 240)  # decay over 4 hours
+        impact_weight = 2.0 if a["high_impact"] else 1.0
+        w = age_weight * impact_weight
+        weights.append(w)
+        scores.append(a["compound"])
+
+    if not weights:
+        return {"score": 0.0, "label": "Neutral", "color": "#8e8e93",
+                "adjustment": 0.0, "articles": [], "count": 0}
+
+    score = sum(s * w for s, w in zip(scores, weights)) / sum(weights)
+    score = max(-1.0, min(1.0, score))
+
+    # Map to label and signal adjustment
+    if score >= 0.25:
+        label, color = "Bullish", "#30d158"
+    elif score <= -0.25:
+        label, color = "Bearish", "#ff375f"
+    else:
+        label, color = "Neutral", "#8e8e93"
+
+    # Signal adjustment: max ±1.5 points added to the technical score
+    adjustment = round(score * 1.5, 2)
+
+    return {
+        "score":      round(score, 3),
+        "label":      label,
+        "color":      color,
+        "adjustment": adjustment,
+        "articles":   relevant[:10],
+        "count":      len(relevant),
+    }
+
+def sentiment_label(compound: float) -> tuple:
+    """Return (label, color, emoji) for a compound VADER score."""
+    if compound >= 0.35:
+        return "Good for market",  "#30d158", "🟢"
+    elif compound >= 0.10:
+        return "Slightly positive", "#34c759", "🟡"
+    elif compound <= -0.35:
+        return "Bad for market",   "#ff375f", "🔴"
+    elif compound <= -0.10:
+        return "Slightly negative", "#ff6b6b", "🟠"
+    else:
+        return "Mixed / Neutral",  "#8e8e93", "⚪"
+
+st.set_page_config(
+    page_title="TopStep Signal Monitor",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# ─── CSS ─────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Apple-style font stack ── */
+html, body, [class*="css"] {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display',
+                 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ── Metric cards ── */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.mc {
+    background: #1c1c1e;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
+    min-height: 76px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.mc-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8e8e93;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.mc-value {
+    font-size: 1.45em;
+    font-weight: 700;
+    color: #f5f5f7;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    margin: 6px 0 4px;
+}
+.mc-delta { font-size: 11px; font-weight: 500; }
+.pos { color: #30d158; }
+.neg { color: #ff375f; }
+.neu { color: #8e8e93; }
+
+/* ── Signal banner ── */
+.sig-banner {
+    border-radius: 14px;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.sig-banner-long  { background: linear-gradient(135deg, #0d2b1a 0%, #0a1f12 100%); border: 1px solid rgba(48,209,88,0.35); }
+.sig-banner-short { background: linear-gradient(135deg, #2b0d12 0%, #1f0a0d 100%); border: 1px solid rgba(255,55,95,0.35); }
+.sig-banner-neu   { background: #1c1c1e; border: 1px solid rgba(255,255,255,0.08); }
+
+.sig-icon   { font-size: 2.2em; line-height: 1; flex-shrink: 0; }
+.sig-center { flex: 1; }
+.sig-dir    { font-size: 1.6em; font-weight: 800; letter-spacing: 0.04em; line-height: 1; }
+.sig-sub    { font-size: 12px; color: #8e8e93; margin-top: 4px; font-weight: 500; }
+
+.sig-right  { text-align: right; flex-shrink: 0; }
+.sig-score-num { font-size: 1.8em; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.sig-score-lbl { font-size: 11px; color: #8e8e93; margin-top: 2px; font-weight: 500; }
+
+/* strength bar */
+.strength-bar-wrap {
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    height: 5px;
+    margin-top: 10px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 260px;
+}
+.strength-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+
+/* ── Two-column panel ── */
+.panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.panel-card {
+    background: #1c1c1e;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8e8e93;
+    margin-bottom: 12px;
+}
+
+/* ── Reason items ── */
+.reason-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    margin: 5px 0;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #ebebf5;
+    border-left: 3px solid transparent;
+}
+.reason-bull { border-left-color: #30d158; }
+.reason-bear { border-left-color: #ff375f; }
+
+/* ── Trade levels table ── */
+.tl-table { width: 100%; border-collapse: collapse; }
+.tl-table tr { border-bottom: 1px solid rgba(255,255,255,0.05); }
+.tl-table tr:last-child { border-bottom: none; }
+.tl-table td { padding: 8px 6px; font-size: 13px; vertical-align: middle; }
+.tl-label { color: #8e8e93; font-weight: 500; width: 50px; }
+.tl-price { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; }
+.tl-meta  { color: #8e8e93; font-size: 11px; text-align: right; }
+.mono { font-family: 'SF Mono', 'Fira Code', monospace; }
+
+/* ── Stats pills ── */
+.stats-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.stat-pill {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #ebebf5;
+    white-space: nowrap;
+}
+.stat-pill span { color: #8e8e93; margin-right: 4px; }
+
+/* ── Trade history table ── */
+.th-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.th-table th {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: #8e8e93;
+    padding: 8px 10px; text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: #1c1c1e;
+}
+.th-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); color: #ebebf5; }
+.th-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+/* ── Badges ── */
+.badge {
+    display: inline-block; padding: 3px 9px;
+    border-radius: 20px; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+.badge-win2  { background: rgba(48,209,88,0.15);  color: #30d158; }
+.badge-win1  { background: rgba(48,209,88,0.1);   color: #30d158; }
+.badge-loss  { background: rgba(255,55,95,0.15);   color: #ff375f; }
+.badge-open  { background: rgba(255,214,10,0.12);  color: #ffd60a; }
+.badge-long  { background: rgba(10,132,255,0.15);  color: #0a84ff; }
+.badge-short { background: rgba(191,90,242,0.15);  color: #bf5af2; }
+
+/* ── Tooltips ── */
+.tt {
+    position: relative; display: inline; cursor: help;
+    border-bottom: 1px dashed rgba(255,255,255,0.3);
+}
+.tt .tt-box {
+    visibility: hidden; opacity: 0;
+    background: #2c2c2e; color: #ebebf5;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 10px 13px;
+    position: absolute; bottom: calc(100% + 8px);
+    left: 50%; transform: translateX(-50%);
+    width: 240px; font-size: 12px; line-height: 1.55;
+    z-index: 9999; white-space: normal;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+    transition: opacity 0.15s ease; pointer-events: none;
+    font-weight: 400;
+}
+.tt:hover .tt-box { visibility: visible; opacity: 1; }
+.tt-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+    font-size: 9px; font-weight: 700; color: #8e8e93;
+    margin-left: 3px; vertical-align: middle; cursor: help; flex-shrink: 0;
+}
+
+/* ── Hide Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+section[data-testid="stSidebar"] { display: none !important; }
+.block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+div[data-testid="stVerticalBlock"] > div { gap: 0rem; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── Glossary ─────────────────────────────────────────────────────────────────
+GLOSSARY = {
+    "EMA":        "Exponential Moving Average — a weighted average of recent prices. Reacts faster than a simple average. Used to identify trend direction.",
+    "EMA9":       "9-period EMA — fastest line, average of last 9 candles. Crossing above EMA21 = bullish sign.",
+    "EMA21":      "21-period EMA — medium-speed average of last 21 candles. Used with EMA9 to spot trend changes.",
+    "EMA50":      "50-period EMA — slow average of last 50 candles. A major support/resistance level. Price above = bullish.",
+    "RSI":        "Relative Strength Index (0–100). Above 70 = overbought (may drop). Below 30 = oversold (may bounce). 50 is neutral.",
+    "MACD":       "Moving Average Convergence Divergence — compares two EMAs to measure momentum. MACD above signal line = bullish.",
+    "VWAP":       "Volume Weighted Average Price — average price by trading volume. Institutions use it as a key benchmark. Above VWAP = buyers in control.",
+    "ATR":        "Average True Range — how many points price moves on average per candle. Used to set stop and target distances.",
+    "BB":         "Bollinger Bands — two bands around price showing normal range. Price at lower band = oversold zone, upper band = overbought zone.",
+    "MNQ":        "Micro E-mini Nasdaq-100 — tracks top 100 Nasdaq stocks. Each 0.25pt tick = $0.50. Good for beginners.",
+    "NQ":         "E-mini Nasdaq-100 — same as MNQ but 10x larger. Each 0.25pt tick = $5.00.",
+    "MES":        "Micro E-mini S&P 500 — tracks the S&P 500 (500 biggest US companies). Each 0.25pt tick = $1.25. Good starter size.",
+    "ES":         "E-mini S&P 500 — standard S&P 500 futures. Each 0.25pt tick = $12.50. Much larger than MES.",
+    "GC":         "Gold Futures (COMEX) — tracks gold price (100 troy oz). Each 0.10pt tick = $10.00.",
+    "MGC":        "Micro Gold Futures — 1/10th size of GC. Each 0.10pt tick = $1.00.",
+    "SL":         "Stop Loss — price where your trade auto-closes to cap your loss. Always set one before entering.",
+    "TP1":        "Take Profit 1 — first exit target. Close 60% of position here and move stop to break-even.",
+    "TP2":        "Take Profit 2 — second, bigger target. Let remaining 40% ride here.",
+    "R:R":        "Risk-to-Reward Ratio. 1:2 means risking $1 to make $2. Always target 1:1.5 or better.",
+    "Tick":       "Smallest possible price movement. MNQ tick = 0.25pts = $0.50. MES tick = 0.25pts = $1.25.",
+    "Long":       "Buying — you profit when price goes UP.",
+    "Short":      "Selling (shorting) — you profit when price goes DOWN.",
+    "Bullish":    "Expecting price to move higher.",
+    "Bearish":    "Expecting price to move lower.",
+    "Crossover":  "When one line crosses another. Fast line above slow line = bullish crossover.",
+    "Overbought": "Price rose too fast, may pull back. RSI above 70 signals this.",
+    "Oversold":   "Price fell too fast, may bounce. RSI below 30 signals this.",
+    "Drawdown":   "Drop from account peak. TopStep ends your eval if this exceeds the limit.",
+    "Daily Loss": "Max you can lose in one trading day. Hit this = stop trading today.",
+    "Contract":   "One unit of futures. 1 MNQ = $0.50/tick. 1 MES = $1.25/tick.",
+    "Eval":       "TopStep challenge — trade profitably within rules to earn a real funded account.",
+    "Scaling":    "Adding contracts to a winning position to increase profit.",
+    "Momentum":   "Speed and strength of a price move. MACD and RSI both measure it.",
+    "Support":    "Price level where buyers appear and stop price falling. Acts like a floor.",
+    "Resistance": "Price level where sellers appear and stop price rising. Acts like a ceiling.",
+}
+
+def tip(label: str, key: str = None) -> str:
+    k = key or label
+    defn = GLOSSARY.get(k, GLOSSARY.get(k.upper(), ""))
+    if not defn:
+        return label
+    return (f'<span class="tt">{label}'
+            f'<span class="tt-icon">?</span>'
+            f'<span class="tt-box">{defn}</span>'
+            f'</span>')
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+TOPSTEP_ACCOUNTS = {
+    "$50K":  {"target": 3000,  "daily_loss": 1500, "max_dd": 2500,  "contract_limit": 5},
+    "$100K": {"target": 6000,  "daily_loss": 2500, "max_dd": 3000,  "contract_limit": 10},
+    "$150K": {"target": 9000,  "daily_loss": 3500, "max_dd": 4500,  "contract_limit": 15},
+}
+
+TICK_INFO = {
+    "MNQ=F": {"tick": 0.25, "value": 0.50,  "name": "MNQ"},
+    "NQ=F":  {"tick": 0.25, "value": 5.00,  "name": "NQ"},
+    "MES=F": {"tick": 0.25, "value": 1.25,  "name": "MES"},
+    "ES=F":  {"tick": 0.25, "value": 12.50, "name": "ES"},
+    "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
+    "GC=F":  {"tick": 0.10, "value": 10.00, "name": "GC"},
+}
+
+# ─── Trade Persistence ────────────────────────────────────────────────────────
+def load_trades() -> list:
+    if os.path.exists(TRADES_FILE):
+        try:
+            with open(TRADES_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_trades(trades: list):
+    try:
+        with open(TRADES_FILE, "w") as f:
+            json.dump(trades[-200:], f, indent=2)  # keep last 200
+    except Exception:
+        pass
+
+def should_record_signal(signal: dict, symbol: str) -> bool:
+    """Use the JSON file (not session state) to decide if this is a genuinely new signal.
+    Guards against: restart duplication, same-direction spam, rapid flipping noise."""
+    if signal["direction"] == "NEUTRAL":
+        return False
+    trades = load_trades()
+    sym_trades = [t for t in trades if t["symbol"] == symbol]
+    if not sym_trades:
+        return True
+    last = sym_trades[-1]
+    # Same direction as last recorded trade → skip (survives restarts)
+    if last["direction"] == signal["direction"]:
+        return False
+    # Cooldown: don't record a new signal within 15 minutes of the last one
+    try:
+        last_time = datetime.fromisoformat(last["timestamp"])
+        if last_time.tzinfo is None:
+            last_time = last_time.replace(tzinfo=PT)
+        elapsed_min = (now_pt() - last_time).total_seconds() / 60
+        if elapsed_min < 15:
+            return False
+    except Exception:
+        pass
+    return True
+
+def record_signal(signal: dict, symbol: str, interval: str) -> dict:
+    trade = {
+        "id":        str(uuid.uuid4())[:8],
+        "symbol":    symbol,
+        "name":      TICK_INFO[symbol]["name"],
+        "interval":  interval,
+        "direction": signal["direction"],
+        "entry":     float(signal["entry"]),
+        "sl":        float(signal["sl"]),
+        "tp1":       float(signal["tp1"]),
+        "tp2":       float(signal["tp2"]),
+        "score":     signal["score"],
+        "reasons":   signal["reasons"],
+        "timestamp": now_pt().isoformat(),
+        "status":    "open",
+        "closed_at": None,
+        "pnl_ticks": None,
+    }
+    trades = load_trades()
+    trades.append(trade)
+    save_trades(trades)
+    send_notification(symbol, signal, TICK_INFO[symbol])
+    return trade
+
+_MAX_PERIOD = {"1m": "7d", "2m": "60d", "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d"}
+
+def check_open_trades(symbol: str, df: pd.DataFrame) -> list:
+    """Walk recent candles and close any open trades that hit SL/TP.
+    Fetches max-allowed history so old open trades are never stuck unresolved."""
+    trades = load_trades()
+    open_trades = [t for t in trades if t["status"] == "open" and t["symbol"] == symbol]
+    if not open_trades or df.empty:
+        return trades
+
+    # Detect the interval from the df index spacing, then fetch max history
+    try:
+        spacing_min = (df.index[-1] - df.index[-2]).total_seconds() / 60
+        if spacing_min <= 1:    iv = "1m"
+        elif spacing_min <= 2:  iv = "2m"
+        elif spacing_min <= 5:  iv = "5m"
+        elif spacing_min <= 15: iv = "15m"
+        elif spacing_min <= 30: iv = "30m"
+        else:                   iv = "1h"
+        max_period = _MAX_PERIOD.get(iv, "60d")
+        ext = fetch_data(symbol, iv, max_period)
+        if not ext.empty and len(ext) > len(df):
+            df = ext
+    except Exception:
+        pass  # fall back to the df already passed in
+
+    changed = False
+    for trade in trades:
+        if trade["status"] != "open" or trade["symbol"] != symbol:
+            continue
+
+        try:
+            sig_time = datetime.fromisoformat(trade["timestamp"])
+            # make sig_time timezone-aware if df index has tz
+            if df.index.tz is not None and sig_time.tzinfo is None:
+                sig_time = sig_time.replace(tzinfo=PT)
+            elif df.index.tz is not None:
+                sig_time = sig_time.astimezone(df.index.tz)
+            after = df[df.index > sig_time]
+        except Exception:
+            continue
+
+        if after.empty:
+            continue
+
+        ti   = TICK_INFO[symbol]["tick"]
+        d    = trade["direction"]
+        sl   = trade["sl"]
+        tp1  = trade["tp1"]
+        tp2  = trade["tp2"]
+        entry = trade["entry"]
+
+        for idx, candle in after.iterrows():
+            hi = float(candle["High"])
+            lo = float(candle["Low"])
+
+            if d == "LONG":
+                sl_hit  = lo <= sl
+                tp1_hit = hi >= tp1
+                tp2_hit = hi >= tp2
+                if sl_hit and tp1_hit:
+                    # Both SL and TP tagged same candle — can't know which hit first.
+                    # Conservative/honest: call it a loss.
+                    trade.update(status="loss", pnl_ticks=round(-abs(entry - sl) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif sl_hit:
+                    trade.update(status="loss", pnl_ticks=round(-abs(entry - sl) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif tp2_hit:
+                    trade.update(status="win_tp2", pnl_ticks=round(abs(tp2 - entry) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif tp1_hit:
+                    trade.update(status="win_tp1", pnl_ticks=round(abs(tp1 - entry) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+            else:  # SHORT
+                sl_hit  = hi >= sl
+                tp1_hit = lo <= tp1
+                tp2_hit = lo <= tp2
+                if sl_hit and tp1_hit:
+                    # Both SL and TP tagged same candle — conservative: call it a loss.
+                    trade.update(status="loss", pnl_ticks=round(-abs(sl - entry) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif sl_hit:
+                    trade.update(status="loss", pnl_ticks=round(-abs(sl - entry) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif tp2_hit:
+                    trade.update(status="win_tp2", pnl_ticks=round(abs(entry - tp2) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif tp1_hit:
+                    trade.update(status="win_tp1", pnl_ticks=round(abs(entry - tp1) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+
+    if changed:
+        save_trades(trades)
+    return trades
+
+def get_stats(trades: list, symbol: str = None) -> dict:
+    pool = [t for t in trades if t["status"] != "open"]
+    if symbol:
+        pool = [t for t in pool if t["symbol"] == symbol]
+    if not pool:
+        return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_ticks": 0, "open": 0}
+    wins   = [t for t in pool if t["status"].startswith("win")]
+    losses = [t for t in pool if t["status"] == "loss"]
+    ticks  = sum(t.get("pnl_ticks", 0) or 0 for t in pool)
+    open_c = len([t for t in trades if t["status"] == "open" and (not symbol or t["symbol"] == symbol)])
+    return {
+        "total":      len(pool),
+        "wins":       len(wins),
+        "losses":     len(losses),
+        "win_rate":   round(len(wins) / len(pool) * 100, 1) if pool else 0,
+        "total_ticks": round(ticks, 1),
+        "open":       open_c,
+    }
+
+def get_adaptive_note(trades: list, symbol: str) -> str:
+    """Return a short insight based on recent trade history."""
+    recent = [t for t in trades if t["symbol"] == symbol and t["status"] != "open"][-10:]
+    if len(recent) < 3:
+        return ""
+    wins = [t for t in recent if t["status"].startswith("win")]
+    rate = len(wins) / len(recent)
+    if rate >= 0.7:
+        return f"🔥 Last {len(recent)} trades: {rate*100:.0f}% win rate — signals are working well on this instrument."
+    elif rate <= 0.35:
+        return f"⚠️ Last {len(recent)} trades: {rate*100:.0f}% win rate — be selective, current conditions may not suit these signals."
+    return f"Last {len(recent)} trades: {rate*100:.0f}% win rate."
+
+# ─── Data ─────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=30)
+def fetch_data(symbol: str, interval: str, period: str) -> pd.DataFrame:
+    try:
+        df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+        if df.empty:
+            return pd.DataFrame()
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        return df.dropna()
+    except Exception:
+        return pd.DataFrame()
+
+# ─── Indicators ───────────────────────────────────────────────────────────────
+def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    if len(df) < 50:
+        return df
+    close, high, low = df["Close"], df["High"], df["Low"]
+    df["EMA9"]  = ta.trend.ema_indicator(close, window=9)
+    df["EMA21"] = ta.trend.ema_indicator(close, window=21)
+    df["EMA50"] = ta.trend.ema_indicator(close, window=50)
+    df["RSI"]   = ta.momentum.rsi(close, window=14)
+    macd = ta.trend.MACD(close, window_slow=26, window_fast=12, window_sign=9)
+    df["MACD"] = macd.macd(); df["MACD_signal"] = macd.macd_signal(); df["MACD_hist"] = macd.macd_diff()
+    bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+    df["BB_upper"] = bb.bollinger_hband(); df["BB_lower"] = bb.bollinger_lband(); df["BB_mid"] = bb.bollinger_mavg()
+    df["ATR"]  = ta.volatility.average_true_range(high, low, close, window=14)
+    df["VWAP"] = (close * df["Volume"]).cumsum() / df["Volume"].cumsum()
+    return df
+
+# ─── Signal Engine ────────────────────────────────────────────────────────────
+def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None) -> dict:
+    empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
+             "entry": None, "sl": None, "tp1": None, "tp2": None, "atr": 0,
+             "price": 0, "rsi": 50, "ema9": 0, "ema21": 0, "ema50": 0, "vwap": 0,
+             "news_adjustment": 0.0}
+    if len(df) < 50:
+        return empty
+
+    last, prev = df.iloc[-1], df.iloc[-2]
+    score, reasons = 0, []
+
+    # EMA stack
+    if last["EMA9"] > last["EMA21"] > last["EMA50"]:
+        score += 2; reasons.append(("bull", f"✅ {tip('EMA','EMA')} stack bullish (9 &gt; 21 &gt; 50)"))
+    elif last["EMA9"] < last["EMA21"] < last["EMA50"]:
+        score -= 2; reasons.append(("bear", f"🔻 {tip('EMA','EMA')} stack bearish (9 &lt; 21 &lt; 50)"))
+    elif last["EMA9"] > last["EMA21"]:
+        score += 1; reasons.append(("bull", f"↑ {tip('EMA9','EMA9')} above {tip('EMA21','EMA21')}"))
+    else:
+        score -= 1; reasons.append(("bear", f"↓ {tip('EMA9','EMA9')} below {tip('EMA21','EMA21')}"))
+
+    # Fresh crossover
+    if prev["EMA9"] <= prev["EMA21"] and last["EMA9"] > last["EMA21"]:
+        score += 1; reasons.append(("bull", f"⚡ Fresh bullish {tip('crossover','Crossover')} (EMA9 crossed above EMA21)"))
+    elif prev["EMA9"] >= prev["EMA21"] and last["EMA9"] < last["EMA21"]:
+        score -= 1; reasons.append(("bear", f"⚡ Fresh bearish {tip('crossover','Crossover')} (EMA9 crossed below EMA21)"))
+
+    # RSI
+    rsi = float(last["RSI"])
+    if rsi < 35:
+        score += 1; reasons.append(("bull", f"📉 {tip('RSI','RSI')} {rsi:.1f} — {tip('oversold','Oversold')} (potential bounce)"))
+    elif rsi > 65:
+        score -= 1; reasons.append(("bear", f"📈 {tip('RSI','RSI')} {rsi:.1f} — {tip('overbought','Overbought')} (potential pullback)"))
+    elif 48 < rsi < 62:
+        score += 0.5; reasons.append(("bull", f"{tip('RSI','RSI')} {rsi:.1f} — in bullish zone"))
+    elif 38 < rsi < 52:
+        score -= 0.5
+
+    # MACD
+    if last["MACD"] > last["MACD_signal"] and float(last["MACD_hist"]) > float(prev["MACD_hist"]):
+        score += 1; reasons.append(("bull", f"✅ {tip('MACD','MACD')} bullish & momentum expanding"))
+    elif last["MACD"] < last["MACD_signal"] and float(last["MACD_hist"]) < float(prev["MACD_hist"]):
+        score -= 1; reasons.append(("bear", f"🔻 {tip('MACD','MACD')} bearish & momentum dropping"))
+
+    # VWAP
+    if float(last["Close"]) > float(last["VWAP"]):
+        score += 0.5; reasons.append(("bull", f"Above {tip('VWAP','VWAP')} — buyers in control"))
+    else:
+        score -= 0.5; reasons.append(("bear", f"Below {tip('VWAP','VWAP')} — sellers in control"))
+
+    # Bollinger Bands
+    if float(last["Close"]) < float(last["BB_lower"]):
+        score += 0.5; reasons.append(("bull", f"At {tip('BB','BB')} lower band — potential bounce zone"))
+    elif float(last["Close"]) > float(last["BB_upper"]):
+        score -= 0.5; reasons.append(("bear", f"At {tip('BB','BB')} upper band — potential reversal zone"))
+
+    # ── News sentiment adjustment ─────────────────────────────────────────────
+    news_adj = 0.0
+    if news_sentiment and news_sentiment.get("count", 0) > 0:
+        news_adj  = news_sentiment["adjustment"]
+        score    += news_adj
+        ns_label  = news_sentiment["label"]
+        ns_score  = news_sentiment["score"]
+        ns_count  = news_sentiment["count"]
+        if news_adj > 0.3:
+            reasons.append(("bull", f"📰 News is positive right now — pushing signal up by +{news_adj:.1f} ({ns_count} articles)"))
+        elif news_adj < -0.3:
+            reasons.append(("bear", f"📰 News is negative right now — pulling signal down by {news_adj:.1f} ({ns_count} articles)"))
+        else:
+            reasons.append(("bull" if news_adj >= 0 else "bear",
+                            f"📰 News is mixed — small influence on signal ({ns_count} articles, {ns_score:+.2f})"))
+
+    score = round(score, 1)
+    direction = "LONG" if score >= 2.5 else "SHORT" if score <= -2.5 else "NEUTRAL"
+
+    atr   = float(last["ATR"])
+    price = float(last["Close"])
+    if direction == "LONG":
+        entry, sl = price, round(price - 1.5 * atr, 2)
+        tp1, tp2  = round(price + 1.5 * atr, 2), round(price + 3.0 * atr, 2)
+    elif direction == "SHORT":
+        entry, sl = price, round(price + 1.5 * atr, 2)
+        tp1, tp2  = round(price - 1.5 * atr, 2), round(price - 3.0 * atr, 2)
+    else:
+        entry = sl = tp1 = tp2 = None
+
+    return {
+        "direction": direction, "score": score, "reasons": reasons,
+        "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2,
+        "atr": atr, "price": price, "rsi": rsi,
+        "ema9":  float(last["EMA9"]),
+        "ema21": float(last["EMA21"]),
+        "ema50": float(last["EMA50"]),
+        "vwap":  float(last["VWAP"]),
+        "news_adjustment": news_adj,
+    }
+
+# ─── Chart ────────────────────────────────────────────────────────────────────
+def build_chart(df: pd.DataFrame, signal: dict) -> go.Figure:
+    fig = make_subplots(
+        rows=3, cols=1, shared_xaxes=True,
+        vertical_spacing=0.03, row_heights=[0.58, 0.21, 0.21],
+    )
+    plot_df = df.tail(200)
+
+    fig.add_trace(go.Candlestick(
+        x=plot_df.index,
+        open=plot_df["Open"], high=plot_df["High"],
+        low=plot_df["Low"],   close=plot_df["Close"],
+        name="Price",
+        increasing_line_color="#00cc66", decreasing_line_color="#ff5050",
+        increasing_fillcolor="#00cc66",  decreasing_fillcolor="#ff5050",
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA9"],  name="EMA9",  line=dict(color="#FFD700", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA21"], name="EMA21", line=dict(color="#FF8C00", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["EMA50"], name="EMA50", line=dict(color="#FF4500", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["VWAP"],  name="VWAP",
+                             line=dict(color="#8888ff", width=1, dash="dot")), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["BB_upper"], name="BB",
+                             line=dict(color="rgba(140,140,140,0.35)", width=1), showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["BB_lower"],
+                             line=dict(color="rgba(140,140,140,0.35)", width=1),
+                             fill="tonexty", fillcolor="rgba(140,140,140,0.04)", showlegend=False, name="BB Lower"), row=1, col=1)
+
+    if signal["entry"] is not None:
+        color = "#00cc66" if signal["direction"] == "LONG" else "#ff5050"
+        fig.add_hline(y=signal["entry"], line_color=color,    line_dash="solid", line_width=1.5, row=1, col=1)
+        fig.add_hline(y=signal["sl"],    line_color="#ff3333", line_dash="dash",  line_width=1,   row=1, col=1,
+                      annotation_text="SL", annotation_position="right", annotation_font_color="#ff3333")
+        fig.add_hline(y=signal["tp1"],   line_color="#00aa55", line_dash="dash",  line_width=1,   row=1, col=1,
+                      annotation_text="TP1", annotation_position="right", annotation_font_color="#00aa55")
+        fig.add_hline(y=signal["tp2"],   line_color="#00ff88", line_dash="dash",  line_width=1,   row=1, col=1,
+                      annotation_text="TP2", annotation_position="right", annotation_font_color="#00ff88")
+
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["RSI"], name="RSI",
+                             line=dict(color="#c084fc", width=1.5)), row=2, col=1)
+    for y, col in [(70, "rgba(255,80,80,0.3)"), (30, "rgba(0,200,100,0.3)"), (50, "rgba(200,200,200,0.1)")]:
+        fig.add_hline(y=y, line_color=col, line_dash="dot", row=2, col=1)
+
+    colors_hist = ["#00cc66" if v >= 0 else "#ff5050" for v in plot_df["MACD_hist"]]
+    fig.add_trace(go.Bar(x=plot_df.index, y=plot_df["MACD_hist"], name="Hist",
+                         marker_color=colors_hist, opacity=0.7), row=3, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD"],        name="MACD",
+                             line=dict(color="#FFD700", width=1.2)), row=3, col=1)
+    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["MACD_signal"], name="Sig",
+                             line=dict(color="#FF8C00", width=1.2)), row=3, col=1)
+
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+        height=600, margin=dict(l=0, r=80, t=10, b=0),
+        legend=dict(orientation="h", y=1.03, x=0, font_size=11),
+        xaxis_rangeslider_visible=False, font=dict(size=11),
+    )
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.04)")
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.04)")
+    return fig
+
+# ─── Sidebar ─────────────────────────────────────────────────────────────────
+def render_sidebar():
+    st.sidebar.title("TopStep Tracker")
+    acct = st.sidebar.selectbox("Account Size", list(TOPSTEP_ACCOUNTS.keys()), key="acct")
+    rules = TOPSTEP_ACCOUNTS[acct]
+
+    st.sidebar.divider()
+    st.sidebar.markdown("**Enter your P&L**")
+    daily_pnl = st.sidebar.number_input("Today's P&L ($)", value=0.0, step=50.0, key="daily_pnl")
+    total_pnl = st.sidebar.number_input("Total P&L ($)",   value=0.0, step=100.0, key="total_pnl")
+
+    daily_rem = rules["daily_loss"] + daily_pnl
+    dd_used   = max(0.0, -total_pnl)
+
+    st.sidebar.divider()
+    st.sidebar.markdown("**Eval Progress**")
+
+    pct = lambda v, mx: max(0.0, min(1.0, v / mx))
+    st.sidebar.progress(pct(daily_rem, rules["daily_loss"]),
+                        text=f"Daily loss room: ${daily_rem:,.0f} / ${rules['daily_loss']:,.0f}")
+    st.sidebar.caption("How much you can still lose today")
+
+    st.sidebar.progress(pct(max(0, total_pnl), rules["target"]),
+                        text=f"Profit target: ${total_pnl:,.0f} / ${rules['target']:,.0f}")
+    st.sidebar.caption("Reach this to pass the eval")
+
+    st.sidebar.progress(pct(dd_used, rules["max_dd"]),
+                        text=f"Max drawdown: ${dd_used:,.0f} / ${rules['max_dd']:,.0f}")
+    st.sidebar.caption("If account drops this far, eval ends")
+
+    st.sidebar.divider()
+    if daily_pnl <= -rules["daily_loss"]:
+        st.sidebar.error("STOP — Daily loss limit hit!")
+    elif dd_used >= rules["max_dd"]:
+        st.sidebar.error("ACCOUNT BUSTED — Max drawdown hit!")
+    elif total_pnl >= rules["target"]:
+        st.sidebar.success("EVAL PASSED! Contact TopStep.")
+    elif daily_rem < rules["daily_loss"] * 0.25:
+        st.sidebar.warning("Low daily loss buffer — trade small")
+    else:
+        st.sidebar.info(f"Active — max {rules['contract_limit']} contracts")
+
+    st.sidebar.divider()
+    # Overall signal stats in sidebar
+    all_trades = load_trades()
+    stats = get_stats(all_trades)
+    if stats["total"] > 0:
+        st.sidebar.markdown("**Signal Track Record (All)**")
+        wr_color = "🟢" if stats["win_rate"] >= 55 else ("🟡" if stats["win_rate"] >= 40 else "🔴")
+        st.sidebar.markdown(f"{wr_color} **{stats['win_rate']}% win rate** — {stats['wins']}W / {stats['losses']}L")
+        tick_color = "clr-pos" if stats["total_ticks"] >= 0 else "clr-neg"
+        st.sidebar.markdown(f"Total ticks: `{stats['total_ticks']:+.1f}` &nbsp;|&nbsp; Open: `{stats['open']}`",
+                            unsafe_allow_html=True)
+
+    return acct, rules
+
+# ─── Instrument Panel ─────────────────────────────────────────────────────────
+def render_instrument(symbol: str, interval: str, period: str):
+    ti = TICK_INFO[symbol]
+    name = ti["name"]
+
+    df = fetch_data(symbol, interval, period)
+    if df.empty:
+        st.error(f"No data for {symbol}. Market may be closed.")
+        return
+
+    df = compute_indicators(df)
+    articles        = fetch_news()
+    news_sentiment  = get_news_sentiment(symbol, articles)
+    signal          = generate_signal(df, symbol, news_sentiment)
+
+    # ── check / update open trades ──
+    trades = check_open_trades(symbol, df)
+
+    # ── record new signal (deduplication via JSON file, not session state) ──
+    if should_record_signal(signal, symbol):
+        record_signal(signal, symbol, interval)
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else last
+    chg  = float(last["Close"]) - float(prev["Close"])
+    pct  = chg / float(prev["Close"]) * 100
+    rsi_val = signal["rsi"]
+    rsi_lbl = "Overbought" if rsi_val > 65 else ("Oversold" if rsi_val < 35 else "Neutral")
+    rsi_cls = "neg" if rsi_val > 65 else ("pos" if rsi_val < 35 else "neu")
+
+    # ── Metric grid (CSS grid — no Streamlit columns so widths are always equal) ──
+    price_cls = "pos" if chg >= 0 else "neg"
+    st.markdown(f"""
+<div class="metrics-grid">
+  <div class="mc">
+    <div class="mc-label">{tip(name, name)}</div>
+    <div class="mc-value">{float(last['Close']):,.2f}</div>
+    <div class="mc-delta {price_cls}">{chg:+.2f} &nbsp;({pct:+.2f}%)</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">{tip('RSI','RSI')}</div>
+    <div class="mc-value">{rsi_val:.1f}</div>
+    <div class="mc-delta {rsi_cls}">{rsi_lbl}</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">{tip('EMA 9','EMA9')}</div>
+    <div class="mc-value">{signal['ema9']:,.2f}</div>
+    <div class="mc-delta neu">9-bar avg</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">{tip('EMA 21','EMA21')}</div>
+    <div class="mc-value">{signal['ema21']:,.2f}</div>
+    <div class="mc-delta neu">21-bar avg</div>
+  </div>
+  <div class="mc">
+    <div class="mc-label">{tip('ATR','ATR')}</div>
+    <div class="mc-value">{signal['atr']:.2f}</div>
+    <div class="mc-delta neu">volatility</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Signal banner (full-width) ────────────────────────────────────────────
+    d        = signal["direction"]
+    score    = signal["score"]
+    strength = abs(score) / 6.0 * 100
+
+    if d == "LONG":
+        banner_cls, icon, dir_color, dir_html = "sig-banner-long",  "📈", "#30d158", tip("LONG","Long")
+        subtitle = "Conditions favor a buy — price likely moving up"
+    elif d == "SHORT":
+        banner_cls, icon, dir_color, dir_html = "sig-banner-short", "📉", "#ff375f", tip("SHORT","Short")
+        subtitle = "Conditions favor a sell — price likely moving down"
+    else:
+        banner_cls, icon, dir_color, dir_html = "sig-banner-neu",   "◯",  "#8e8e93", "WAITING"
+        subtitle = "No clear setup yet — stay out until signal confirms"
+
+    bar_color = "#30d158" if d == "LONG" else ("#ff375f" if d == "SHORT" else "#48484a")
+
+    st.markdown(f"""
+<div class="sig-banner {banner_cls}">
+  <div class="sig-icon">{icon}</div>
+  <div class="sig-center">
+    <div class="sig-dir" style="color:{dir_color}">{dir_html}</div>
+    <div class="sig-sub">{subtitle}</div>
+    <div class="strength-bar-wrap">
+      <div class="strength-bar-fill" style="width:{strength:.0f}%;background:{bar_color}"></div>
+    </div>
+  </div>
+  <div class="sig-right">
+    <div class="sig-score-num" style="color:{dir_color}">{score:+.1f}</div>
+    <div class="sig-score-lbl">score / 6.0</div>
+    <div class="sig-score-lbl" style="margin-top:4px">{strength:.0f}% strength</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Two-panel row: Reasons | Trade Levels ────────────────────────────────
+    reasons_html = ""
+    for polarity, text in signal["reasons"]:
+        cls = "reason-bull" if polarity == "bull" else "reason-bear"
+        reasons_html += f'<div class="reason-item {cls}">{text}</div>'
+    if not reasons_html:
+        reasons_html = '<div class="reason-item">Not enough candle data yet</div>'
+
+    if signal["entry"] is not None:
+        tick_sz   = ti["tick"]
+        tick_val  = ti["value"]
+        sl_ticks  = abs(signal["entry"] - signal["sl"])  / tick_sz
+        tp1_ticks = abs(signal["entry"] - signal["tp1"]) / tick_sz
+        tp2_ticks = abs(signal["entry"] - signal["tp2"]) / tick_sz
+        levels_html = f"""
+<table class="tl-table">
+  <tr>
+    <td class="tl-label">Entry</td>
+    <td class="tl-price mono">{signal['entry']:,.2f}</td>
+    <td class="tl-meta">—</td>
+  </tr>
+  <tr>
+    <td class="tl-label" style="color:#ff375f">{tip('Stop','SL')}</td>
+    <td class="tl-price mono" style="color:#ff375f">{signal['sl']:,.2f}</td>
+    <td class="tl-meta" style="color:#ff375f">{sl_ticks:.0f} {tip('ticks','Tick')} &nbsp;· &nbsp;${sl_ticks*tick_val:,.0f}</td>
+  </tr>
+  <tr>
+    <td class="tl-label" style="color:#30d158">{tip('TP1','TP1')}</td>
+    <td class="tl-price mono" style="color:#30d158">{signal['tp1']:,.2f}</td>
+    <td class="tl-meta" style="color:#30d158">{tp1_ticks:.0f} ticks &nbsp;· &nbsp;${tp1_ticks*tick_val:,.0f}</td>
+  </tr>
+  <tr>
+    <td class="tl-label" style="color:#34c759">{tip('TP2','TP2')}</td>
+    <td class="tl-price mono" style="color:#34c759">{signal['tp2']:,.2f}</td>
+    <td class="tl-meta" style="color:#34c759">{tp2_ticks:.0f} ticks &nbsp;· &nbsp;${tp2_ticks*tick_val:,.0f}</td>
+  </tr>
+  <tr>
+    <td class="tl-label" style="color:#8e8e93">{tip('R:R','R:R')}</td>
+    <td colspan="2" class="tl-price" style="color:#8e8e93">1:1 to TP1 &nbsp;/&nbsp; 1:2 to TP2</td>
+  </tr>
+</table>"""
+        levels_panel = f'<div class="panel-card"><div class="panel-title">Trade Levels</div>{levels_html}</div>'
+    else:
+        levels_panel = f'<div class="panel-card"><div class="panel-title">Trade Levels</div><div style="color:#8e8e93;font-size:13px;padding-top:8px">No active signal — levels appear when direction confirms.</div></div>'
+
+    st.markdown(f"""
+<div class="panel-grid">
+  <div class="panel-card">
+    <div class="panel-title">Why This Signal</div>
+    {reasons_html}
+  </div>
+  {levels_panel}
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Chart ─────────────────────────────────────────────────────────────────
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    fig = build_chart(df, signal)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    # ── Row 5: Trade History ──────────────────────────────────────────────────
+    sym_trades = [t for t in trades if t["symbol"] == symbol]
+    stats = get_stats(trades, symbol)
+    note  = get_adaptive_note(trades, symbol)
+
+    with st.expander(f"Signal Track Record — {name}  ({stats['wins']}W / {stats['losses']}L / {stats['open']} open)", expanded=False):
+        if stats["total"] > 0 or stats["open"] > 0:
+            wr_icon = "🟢" if stats["win_rate"] >= 55 else ("🟡" if stats["win_rate"] >= 40 else "🔴")
+            ticks_cls = "pos" if stats["total_ticks"] >= 0 else "neg"
+            st.markdown(f"""
+<div class="stats-row">
+  <div class="stat-pill"><span>Win Rate</span><b>{wr_icon} {stats['win_rate']}%</b></div>
+  <div class="stat-pill"><span>Closed</span><b>{stats['total']}</b></div>
+  <div class="stat-pill"><span>Wins</span><b class="pos">{stats['wins']}</b></div>
+  <div class="stat-pill"><span>Losses</span><b class="neg">{stats['losses']}</b></div>
+  <div class="stat-pill"><span>{tip('Ticks','Tick')}</span><b class="{ticks_cls}">{stats['total_ticks']:+.1f}</b></div>
+  <div class="stat-pill"><span>Open</span><b style="color:#ffd60a">{stats['open']}</b></div>
+</div>""", unsafe_allow_html=True)
+
+            if note:
+                st.info(note)
+
+            # Table — most recent first
+            rows = ""
+            for t in reversed(sym_trades[-30:]):
+                s = t["status"]
+                if s == "win_tp2":
+                    badge = '<span class="badge badge-win2">WIN TP2</span>'
+                elif s == "win_tp1":
+                    badge = '<span class="badge badge-win1">WIN TP1</span>'
+                elif s == "loss":
+                    badge = '<span class="badge badge-loss">LOSS</span>'
+                else:
+                    badge = '<span class="badge badge-open">OPEN</span>'
+
+                dir_badge = (f'<span class="badge badge-long">LONG</span>'
+                             if t["direction"] == "LONG"
+                             else '<span class="badge badge-short">SHORT</span>')
+                ticks_str = f'{t["pnl_ticks"]:+.1f}' if t.get("pnl_ticks") is not None else "—"
+                ticks_color_inline = "#00cc66" if (t.get("pnl_ticks") or 0) > 0 else ("#ff5050" if (t.get("pnl_ticks") or 0) < 0 else "#888")
+
+                try:
+                    ts = datetime.fromisoformat(t["timestamp"]).astimezone(PT).strftime("%m/%d %I:%M %p")
+                except Exception:
+                    ts = t["timestamp"][:16]
+
+                rows += f"""
+<tr>
+  <td style="color:#888">{ts} PT</td>
+  <td>{dir_badge}</td>
+  <td class="mono">{t['entry']:,.2f}</td>
+  <td class="mono" style="color:#ff5050">{t['sl']:,.2f}</td>
+  <td class="mono" style="color:#00aa55">{t['tp1']:,.2f}</td>
+  <td class="mono" style="color:#00ff88">{t['tp2']:,.2f}</td>
+  <td style="color:{ticks_color_inline}">{ticks_str}</td>
+  <td>{badge}</td>
+</tr>"""
+
+            st.markdown(f"""
+<div style="overflow-x:auto">
+<table class="th-table">
+  <thead><tr>
+    <th>Time (PT)</th><th>Dir</th><th>Entry</th>
+    <th>{tip('SL','SL')}</th><th>{tip('TP1','TP1')}</th><th>{tip('TP2','TP2')}</th>
+    <th>{tip('Ticks','Tick')}</th><th>Result</th>
+  </tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+</div>""", unsafe_allow_html=True)
+
+            if st.button("Clear trade history", key=f"clear_{symbol}"):
+                remaining = [t for t in load_trades() if t["symbol"] != symbol]
+                save_trades(remaining)
+                st.rerun()
+        else:
+            st.info("No signals recorded yet. Signals are captured automatically when direction changes.")
+
+# ─── News Tab ─────────────────────────────────────────────────────────────────
+def render_news_tab():
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    with st.spinner("Loading latest news..."):
+        articles = fetch_news()
+
+    if not articles:
+        st.warning("Could not load news feeds. Check your internet connection.")
+        return
+
+    # ── Overall market sentiment across all symbols ───────────────────────────
+    def overall_sent(groups):
+        rel = [a for a in articles if any(g in a["groups"] for g in groups)][:20]
+        if not rel: return 0.0
+        return sum(a["compound"] for a in rel) / len(rel)
+
+    nasdaq_sent = overall_sent(["nasdaq", "macro"])
+    sp500_sent  = overall_sent(["sp500",  "macro"])
+    gold_sent   = overall_sent(["gold",   "macro"])
+
+    def sent_html(score):
+        if score >= 0.2:   return f'<span class="pos">▲ Positive news ({score:+.2f})</span>'
+        elif score <= -0.2: return f'<span class="neg">▼ Negative news ({score:+.2f})</span>'
+        else:               return f'<span class="neu">● Mixed news ({score:+.2f})</span>'
+
+    st.markdown(f"""
+<div class="panel-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="mc" style="height:auto;padding:16px 18px">
+    <div class="mc-label">Nasdaq / Tech Sentiment</div>
+    <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(nasdaq_sent)}</div>
+    <div class="mc-delta neu">MNQ · NQ signals</div>
+  </div>
+  <div class="mc" style="height:auto;padding:16px 18px">
+    <div class="mc-label">S&P 500 Sentiment</div>
+    <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(sp500_sent)}</div>
+    <div class="mc-delta neu">MES · ES signals</div>
+  </div>
+  <div class="mc" style="height:auto;padding:16px 18px">
+    <div class="mc-label">Gold / Macro Sentiment</div>
+    <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(gold_sent)}</div>
+    <div class="mc-delta neu">GC · MGC signals</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("""
+<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+     border-radius:10px;padding:12px 16px;margin:12px 0;font-size:12px;color:#8e8e93">
+  📰 <b style="color:#ebebf5">How news affects your signals:</b>
+  Positive news can add up to +1.5 points to a signal. Negative news can subtract up to 1.5 points.
+  Big events like Fed meetings, CPI, and jobs reports are counted twice as heavily.
+  News older than 4 hours fades out. Check the "Why This Signal" section on each tab to see the news impact.
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+    # ── Filters ──────────────────────────────────────────────────────────────
+    f1, f2 = st.columns([2, 1])
+    with f1:
+        filter_group = st.selectbox("Filter by market", ["All", "Nasdaq/Tech", "S&P 500", "Gold", "Big Events Only"],
+                                    key="news_filter")
+    with f2:
+        filter_sent = st.selectbox("News tone", ["All", "Positive", "Negative", "Mixed"], key="news_sent_filter")
+
+    group_map = {"Nasdaq/Tech": "nasdaq", "S&P 500": "sp500", "Gold": "gold"}
+
+    filtered = articles
+    if filter_group == "Big Events Only":
+        filtered = [a for a in filtered if a["high_impact"]]
+    elif filter_group in group_map:
+        filtered = [a for a in filtered if group_map[filter_group] in a["groups"]
+                    or "macro" in a["groups"]]
+    if filter_sent == "Positive":
+        filtered = [a for a in filtered if a["compound"] >= 0.1]
+    elif filter_sent == "Negative":
+        filtered = [a for a in filtered if a["compound"] <= -0.1]
+    elif filter_sent == "Mixed":
+        filtered = [a for a in filtered if -0.1 < a["compound"] < 0.1]
+
+    st.markdown(f"<div style='color:#8e8e93;font-size:12px;margin:8px 0'>{len(filtered)} articles</div>",
+                unsafe_allow_html=True)
+
+    # ── Article cards ─────────────────────────────────────────────────────────
+    for a in filtered[:25]:
+        label, color, emoji = sentiment_label(a["compound"])
+
+        # Age display
+        if a["age_min"] < 60:
+            age_str = f"{int(a['age_min'])}m ago"
+        elif a["age_min"] < 1440:
+            age_str = f"{int(a['age_min']/60)}h ago"
+        else:
+            age_str = f"{int(a['age_min']/1440)}d ago"
+
+        # Instrument tags (controlled strings only — no user text)
+        tag_map = {"nasdaq": "MNQ/NQ", "sp500": "MES/ES", "gold": "GC/MGC", "macro": "ALL"}
+        inst_labels = [tag_map[g] for g in a["groups"] if g in tag_map]
+
+        # Summary — plain text only, no HTML injection
+        summary_text = a["summary"][:200] + ("…" if len(a["summary"]) > 200 else "")
+
+        # Card border color via left-border trick (no user text in HTML)
+        mover_flag = " ⚡ MARKET MOVER" if a["high_impact"] else ""
+
+        with st.container():
+            st.markdown(
+                f'<div style="border-left:3px solid {color};background:#1c1c1e;'
+                f'border-radius:10px;padding:12px 16px;margin:6px 0;'
+                f'border:1px solid rgba(255,255,255,0.07);border-left:3px solid {color}"></div>',
+                unsafe_allow_html=True
+            )
+            col_main, col_score = st.columns([5, 1])
+            with col_main:
+                st.markdown(f"**{emoji} {a['title']}{mover_flag}**")
+                st.caption(summary_text)
+                tags_str = "  ·  ".join(inst_labels)
+                meta = f"{a['source']} · {age_str}"
+                if tags_str:
+                    meta += f"  ·  {tags_str}"
+                st.markdown(
+                    f'<span style="font-size:11px;color:#636366">{meta}</span>'
+                    f'  <span style="background:rgba(255,255,255,0.06);border-radius:4px;'
+                    f'padding:1px 8px;font-size:11px;font-weight:600;color:{color}">{label}</span>',
+                    unsafe_allow_html=True
+                )
+            with col_score:
+                st.metric(label="", value=f"{a['compound']:+.2f}")
+            st.divider()
+
+    # ── Economic event reminder ───────────────────────────────────────────────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    with st.expander("Key Economic Events to Watch", expanded=False):
+        for ev in ECON_EVENTS:
+            impact_color = "#ff375f" if ev["impact"] == "HIGH" else "#ffd60a"
+            st.markdown(f"""
+<div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.07);border-radius:8px;
+     padding:12px 14px;margin:5px 0;display:flex;gap:12px;align-items:flex-start">
+  <span style="background:rgba(255,255,255,0.06);color:{impact_color};font-size:10px;
+        font-weight:700;border-radius:4px;padding:2px 7px;white-space:nowrap;margin-top:2px">{ev['impact']}</span>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#f5f5f7;margin-bottom:3px">{ev['name']}</div>
+    <div style="font-size:12px;color:#8e8e93">{ev['desc']}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ─── Trade Log Tab ────────────────────────────────────────────────────────────
+def render_trade_log():
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    all_trades = load_trades()
+
+    if not all_trades:
+        st.info("No trades recorded yet. Signals are saved automatically when a direction is detected on any tab.")
+        return
+
+    # ── Overall stats across all instruments ─────────────────────────────────
+    stats_all = get_stats(all_trades)
+    by_sym = {}
+    for sym in TICK_INFO:
+        s = get_stats(all_trades, sym)
+        if s["total"] > 0 or s["open"] > 0:
+            by_sym[sym] = s
+
+    wr_color = "#30d158" if stats_all["win_rate"] >= 55 else ("#ffd60a" if stats_all["win_rate"] >= 40 else "#ff375f")
+    ticks_cls = "pos" if stats_all["total_ticks"] >= 0 else "neg"
+
+    st.markdown(f"""
+<div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:20px 24px;margin-bottom:16px">
+  <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8e8e93;margin-bottom:14px">Overall Record — All Instruments</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+    <div><div style="font-size:10px;color:#8e8e93;margin-bottom:4px">Win Rate</div>
+         <div style="font-size:1.6em;font-weight:700;color:{wr_color}">{stats_all['win_rate']}%</div></div>
+    <div><div style="font-size:10px;color:#8e8e93;margin-bottom:4px">Total Trades</div>
+         <div style="font-size:1.6em;font-weight:700;color:#f5f5f7">{stats_all['total']}</div></div>
+    <div><div style="font-size:10px;color:#8e8e93;margin-bottom:4px">Wins</div>
+         <div style="font-size:1.6em;font-weight:700;color:#30d158">{stats_all['wins']}</div></div>
+    <div><div style="font-size:10px;color:#8e8e93;margin-bottom:4px">Losses</div>
+         <div style="font-size:1.6em;font-weight:700;color:#ff375f">{stats_all['losses']}</div></div>
+    <div><div style="font-size:10px;color:#8e8e93;margin-bottom:4px">Total Ticks</div>
+         <div style="font-size:1.6em;font-weight:700" class="{ticks_cls}">{stats_all['total_ticks']:+.1f}</div></div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Per-instrument mini stats ─────────────────────────────────────────────
+    if by_sym:
+        cols = st.columns(len(by_sym))
+        for i, (sym, s) in enumerate(by_sym.items()):
+            name = TICK_INFO[sym]["name"]
+            wrc  = "#30d158" if s["win_rate"] >= 55 else ("#ffd60a" if s["win_rate"] >= 40 else "#ff375f")
+            tc   = "pos" if s["total_ticks"] >= 0 else "neg"
+            cols[i].markdown(f"""
+<div class="mc" style="height:auto;padding:14px 16px">
+  <div class="mc-label">{name}</div>
+  <div style="font-size:1.2em;font-weight:700;color:{wrc};margin:6px 0">{s['win_rate']}% wins</div>
+  <div style="font-size:11px;color:#8e8e93">{s['wins']}W / {s['losses']}L / <span style="color:#ffd60a">{s['open']} open</span></div>
+  <div style="font-size:11px;margin-top:4px" class="{tc}">{s['total_ticks']:+.1f} ticks</div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # ── Filters ───────────────────────────────────────────────────────────────
+    fc1, fc2, fc3 = st.columns(3)
+    sym_options = ["All"] + [TICK_INFO[s]["name"] for s in TICK_INFO
+                             if any(t["symbol"] == s for t in all_trades)]
+    with fc1:
+        f_sym = st.selectbox("Instrument", sym_options, key="log_sym")
+    with fc2:
+        f_dir = st.selectbox("Direction", ["All", "LONG", "SHORT"], key="log_dir")
+    with fc3:
+        f_res = st.selectbox("Result", ["All", "Open", "Win", "Loss"], key="log_res")
+
+    # Apply filters
+    filtered = list(reversed(all_trades))  # newest first
+    if f_sym != "All":
+        filtered = [t for t in filtered if TICK_INFO.get(t["symbol"], {}).get("name") == f_sym]
+    if f_dir != "All":
+        filtered = [t for t in filtered if t["direction"] == f_dir]
+    if f_res == "Open":
+        filtered = [t for t in filtered if t["status"] == "open"]
+    elif f_res == "Win":
+        filtered = [t for t in filtered if t["status"].startswith("win")]
+    elif f_res == "Loss":
+        filtered = [t for t in filtered if t["status"] == "loss"]
+
+    st.markdown(f"<div style='color:#8e8e93;font-size:12px;margin:4px 0 10px'>{len(filtered)} trades</div>",
+                unsafe_allow_html=True)
+
+    # ── Table ─────────────────────────────────────────────────────────────────
+    if filtered:
+        rows = ""
+        for t in filtered[:50]:
+            s = t["status"]
+            if s == "win_tp2":
+                result_badge = '<span class="badge badge-win2">WIN — Hit TP2</span>'
+            elif s == "win_tp1":
+                result_badge = '<span class="badge badge-win1">WIN — Hit TP1</span>'
+            elif s == "loss":
+                result_badge = '<span class="badge badge-loss">LOSS — Hit Stop</span>'
+            else:
+                result_badge = '<span class="badge badge-open">OPEN</span>'
+
+            dir_badge = (f'<span class="badge badge-long">BUY</span>'
+                         if t["direction"] == "LONG"
+                         else '<span class="badge badge-short">SELL</span>')
+
+            name = TICK_INFO.get(t["symbol"], {}).get("name", t["symbol"])
+            ticks_str  = f'{t["pnl_ticks"]:+.1f}' if t.get("pnl_ticks") is not None else "—"
+            ticks_color = "#30d158" if (t.get("pnl_ticks") or 0) > 0 else ("#ff375f" if (t.get("pnl_ticks") or 0) < 0 else "#8e8e93")
+            tick_val   = TICK_INFO.get(t["symbol"], {}).get("value", 0)
+            dollar_str = f'${abs((t.get("pnl_ticks") or 0) * tick_val):,.0f}' if t.get("pnl_ticks") is not None else "—"
+            dollar_color = ticks_color
+
+            try:
+                ts = datetime.fromisoformat(t["timestamp"]).astimezone(PT).strftime("%m/%d  %I:%M %p")
+            except Exception:
+                ts = t["timestamp"][:16]
+
+            rows += f"""
+<tr>
+  <td style="color:#636366;white-space:nowrap">{ts}</td>
+  <td><b style="color:#f5f5f7">{name}</b></td>
+  <td>{dir_badge}</td>
+  <td class="mono" style="color:#f5f5f7">{t['entry']:,.2f}</td>
+  <td class="mono" style="color:#ff375f">{t['sl']:,.2f}</td>
+  <td class="mono" style="color:#30d158">{t['tp1']:,.2f}</td>
+  <td class="mono" style="color:#34c759">{t['tp2']:,.2f}</td>
+  <td style="color:{ticks_color};font-weight:600">{ticks_str}</td>
+  <td style="color:{dollar_color};font-weight:600">{dollar_str}</td>
+  <td>{result_badge}</td>
+</tr>"""
+
+        st.markdown(f"""
+<div style="overflow-x:auto;border-radius:10px;border:1px solid rgba(255,255,255,0.07)">
+<table class="th-table">
+  <thead><tr>
+    <th>Date / Time (PT)</th>
+    <th>Market</th>
+    <th>Trade</th>
+    <th>Entry Price</th>
+    <th>Stop</th>
+    <th>Target 1</th>
+    <th>Target 2</th>
+    <th>Ticks</th>
+    <th>P&amp;L</th>
+    <th>Result</th>
+  </tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+</div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        cc1, cc2 = st.columns([1, 5])
+        with cc1:
+            if st.button("Clear all trades", key="clear_all_log", type="secondary"):
+                save_trades([])
+                st.rerun()
+    else:
+        st.info("No trades match your filters.")
+
+# ─── Scaling Guide ────────────────────────────────────────────────────────────
+def render_scale_guide(rules: dict):
+    with st.expander("Scaling Strategy & Session Guide", expanded=False):
+        st.markdown(f"""
+<h4>How to {tip('Scale','Scaling')} Into Signals</h4>
+<ol>
+  <li><b>Entry 1</b> — 1 {tip('contract','Contract')} when signal fires ({tip('EMA','EMA')} stack + {tip('MACD','MACD')} agree)</li>
+  <li><b>Add</b> — 1 more {tip('contract','Contract')} if price moves 8–10 {tip('ticks','Tick')} in your favor. Move {tip('stop loss','SL')} on position 1 to break-even</li>
+  <li><b>Exit {tip('TP1','TP1')}</b> — Close 60% of position, slide remaining {tip('stop loss','SL')} to entry</li>
+  <li><b>Exit {tip('TP2','TP2')}</b> — Let the last 40% run to TP2</li>
+</ol>
+
+<h4>Risk Rules</h4>
+<ul>
+  <li>Never risk more than 30% of your {tip('daily loss limit','Daily Loss')} on one trade</li>
+  <li>Your max risk per trade right now: <b>${rules['daily_loss'] * 0.3:,.0f}</b></li>
+  <li>Always ensure {tip('R:R','R:R')} is at least 1:1.5 before entering</li>
+  <li>After 2 losses in a row — stop trading for the day</li>
+</ul>
+
+<h4>Best Times (California / PT)</h4>
+<table style="font-size:13px; border-collapse:collapse; width:100%">
+  <tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:5px 8px;color:#888">Market</th><th style="text-align:left;padding:5px 8px;color:#888">Best Window</th><th style="text-align:left;padding:5px 8px;color:#888">Notes</th></tr>
+  <tr><td style="padding:5px 8px">{tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>6:30–8:30 AM PT</b></td><td style="padding:5px 8px;color:#888">Market open — highest {tip('momentum','Momentum')}</td></tr>
+  <tr><td style="padding:5px 8px">{tip('MNQ','MNQ')} / {tip('MES','MES')}</td><td style="padding:5px 8px"><b>11:00 AM–1:00 PM PT</b></td><td style="padding:5px 8px;color:#888">Market close — second best window</td></tr>
+  <tr><td style="padding:5px 8px">{tip('GC','GC')} / {tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>5:20 AM PT</b></td><td style="padding:5px 8px;color:#888">COMEX open</td></tr>
+  <tr><td style="padding:5px 8px">{tip('GC','GC')} / {tip('MGC','MGC')}</td><td style="padding:5px 8px"><b>12:00–2:00 AM PT</b></td><td style="padding:5px 8px;color:#888">London session</td></tr>
+  <tr style="color:#ff8080"><td style="padding:5px 8px">❌ All</td><td style="padding:5px 8px"><b>9:00–10:30 AM PT</b></td><td style="padding:5px 8px">Lunch chop — slow, unpredictable</td></tr>
+</table>
+
+<br><h4>{tip('Eval','Eval')} Tips</h4>
+<ul>
+  <li>Hit <b>65% of profit target</b> then go small — protect the pass</li>
+  <li>Never revenge trade. Down 50% of {tip('daily loss','Daily Loss')}? Log off</li>
+  <li>Watch your {tip('drawdown','Drawdown')} — never let a bad streak snowball</li>
+  <li>3–5% account growth per day is the sweet spot for passing consistently</li>
+</ul>
+""", unsafe_allow_html=True)
+
+# ─── Settings Tab (replaces sidebar entirely) ─────────────────────────────────
+def render_settings_tab():
+    cfg = load_config()
+
+    # ── TopStep Eval Tracker ──────────────────────────────────────────────────
+    st.markdown("### TopStep Eval Tracker")
+    acct = st.selectbox("Account Size", list(TOPSTEP_ACCOUNTS.keys()), key="acct")
+    rules = TOPSTEP_ACCOUNTS[acct]
+    # store for use by scale guide in main()
+    st.session_state["rules"] = rules
+
+    st.markdown("**Enter your P&L**")
+    col1, col2 = st.columns(2)
+    with col1:
+        daily_pnl = st.number_input("Today's P&L ($)", value=0.0, step=50.0, key="daily_pnl")
+    with col2:
+        total_pnl = st.number_input("Total P&L ($)", value=0.0, step=100.0, key="total_pnl")
+
+    daily_rem = rules["daily_loss"] + daily_pnl
+    dd_used   = max(0.0, -total_pnl)
+    pct = lambda v, mx: max(0.0, min(1.0, v / mx))
+
+    st.markdown("**Eval Progress**")
+    st.progress(pct(daily_rem, rules["daily_loss"]),
+                text=f"Daily loss room: ${daily_rem:,.0f} / ${rules['daily_loss']:,.0f}")
+    st.caption("How much you can still lose today")
+    st.progress(pct(max(0, total_pnl), rules["target"]),
+                text=f"Profit target: ${total_pnl:,.0f} / ${rules['target']:,.0f}")
+    st.caption("Reach this to pass the eval")
+    st.progress(pct(dd_used, rules["max_dd"]),
+                text=f"Max drawdown: ${dd_used:,.0f} / ${rules['max_dd']:,.0f}")
+    st.caption("If account drops this far, eval ends")
+
+    if daily_pnl <= -rules["daily_loss"]:
+        st.error("STOP — Daily loss limit hit!")
+    elif dd_used >= rules["max_dd"]:
+        st.error("ACCOUNT BUSTED — Max drawdown hit!")
+    elif total_pnl >= rules["target"]:
+        st.success("EVAL PASSED! Contact TopStep.")
+    elif daily_rem < rules["daily_loss"] * 0.25:
+        st.warning("Low daily loss buffer — trade small")
+    else:
+        st.info(f"Active — max {rules['contract_limit']} contracts")
+
+    # ── Signal Track Record ───────────────────────────────────────────────────
+    all_trades = load_trades()
+    stats = get_stats(all_trades)
+    if stats["total"] > 0:
+        st.divider()
+        st.markdown("**Signal Track Record (All)**")
+        wr_color = "green" if stats["win_rate"] >= 55 else ("orange" if stats["win_rate"] >= 40 else "red")
+        st.markdown(f"**{stats['win_rate']}% win rate** — {stats['wins']}W / {stats['losses']}L / {stats['open']} open")
+
+    # ── Phone Alerts ──────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### Phone Alerts")
+    st.caption("Get a notification on your phone when a strong signal fires.")
+
+    notify_on = st.toggle("Send alerts to my phone", value=cfg.get("notify_enabled", False), key="notify_toggle")
+    topic_val = st.text_input(
+        "Your alert topic name",
+        value=cfg.get("ntfy_topic", "topstepdraco42"),
+        key="ntfy_topic_input",
+        help="This is the topic name you subscribed to in the ntfy app."
+    )
+    min_score = st.slider(
+        "Only alert me when signal strength is at least",
+        min_value=2.5, max_value=6.0, step=0.5,
+        value=float(cfg.get("min_score", 3.0)),
+        key="ntfy_min_score",
+        help="Higher = fewer but stronger alerts. Max possible score is 6.0."
+    )
+
+    new_cfg = {"ntfy_topic": topic_val, "notify_enabled": notify_on, "min_score": min_score}
+    if new_cfg != cfg:
+        save_config(new_cfg)
+
+    if notify_on and topic_val:
+        st.success(f"Active — alerts going to: `{topic_val}`")
+        if st.button("Send test alert now", key="test_notif"):
+            try:
+                requests.post(
+                    f"https://ntfy.sh/{topic_val}",
+                    data="TopStep Signal Monitor is connected. You will get alerts here when a signal fires.".encode("utf-8"),
+                    headers={"Title": "TopStep - Test Alert", "Priority": "default"},
+                    timeout=5,
+                )
+                st.success("Sent! Check your phone.")
+            except Exception as e:
+                st.error(f"Failed: {e}")
+    elif notify_on and not topic_val:
+        st.warning("Enter a topic name to activate.")
+    else:
+        st.markdown("""
+**Quick setup (2 minutes):**
+
+1. Download the **ntfy** app — free, no account needed
+   - iPhone: search "ntfy" in the App Store
+   - Android: search "ntfy" in the Play Store
+2. Open the app, tap **+**, subscribe to topic: `topstepdraco42`
+3. Toggle on alerts above, then tap **Send test alert now**
+""")
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+def main():
+    st.markdown(f"## TopStep Signal Monitor")
+    st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
+               unsafe_allow_html=True)
+
+    tf_col, _, ref_col = st.columns([2, 3, 2])
+    with tf_col:
+        interval = st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
+    with ref_col:
+        auto_refresh = st.toggle("Auto Refresh (30s)", value=False)
+
+    period_map = {"1m":"7d","2m":"60d","5m":"60d","15m":"60d","30m":"60d","1h":"730d"}
+    period = period_map.get(interval, "5d")
+
+    st.divider()
+
+    tab_mnq, tab_es, tab_gold, tab_news, tab_log, tab_settings = st.tabs([
+        "MNQ / NQ — Nasdaq",
+        "MES / ES — S&P 500",
+        "MGC / GC — Gold",
+        "News",
+        "Trade Log",
+        "Settings",
+    ])
+
+    with tab_mnq:
+        sym = st.radio("Symbol", ["MNQ=F","NQ=F"], horizontal=True, key="sym_mnq",
+                       captions=["Micro — $0.50/tick", "E-mini — $5.00/tick"])
+        st.divider()
+        render_instrument(sym, interval, period)
+
+    with tab_es:
+        sym = st.radio("Symbol", ["MES=F","ES=F"], horizontal=True, key="sym_es",
+                       captions=["Micro — $1.25/tick", "E-mini — $12.50/tick"])
+        st.divider()
+        render_instrument(sym, interval, period)
+
+    with tab_gold:
+        sym = st.radio("Symbol", ["GC=F","MGC=F"], horizontal=True, key="sym_gold",
+                       captions=["Gold — $10.00/tick", "Micro Gold — $1.00/tick"])
+        st.divider()
+        render_instrument(sym, interval, period)
+
+    with tab_news:
+        render_news_tab()
+
+    with tab_log:
+        render_trade_log()
+
+    with tab_settings:
+        render_settings_tab()
+
+    st.divider()
+    render_scale_guide(st.session_state.get("rules", TOPSTEP_ACCOUNTS["$50K"]))
+
+    if auto_refresh:
+        time.sleep(30)
+        st.cache_data.clear()
+        st.rerun()
+
+if __name__ == "__main__":
+    main()
