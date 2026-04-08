@@ -1334,7 +1334,7 @@ def render_news_tab():
     st.markdown(f"<div style='color:#8e8e93;font-size:12px;margin:8px 0'>{len(filtered)} articles</div>",
                 unsafe_allow_html=True)
 
-    # ── Article cards ─────────────────────────────────────────────────────────
+    # ── Article cards — use native Streamlit for all user text (no HTML injection) ──
     for a in filtered[:25]:
         label, color, emoji = sentiment_label(a["compound"])
 
@@ -1345,54 +1345,29 @@ def render_news_tab():
         else:
             age_str = f"{int(a['age_min']/1440)}d ago"
 
-        tag_map = {"nasdaq": "MNQ/NQ", "sp500": "MES/ES", "gold": "GC/MGC", "macro": "ALL"}
-        inst_tags = "".join(
-            f'<span style="background:rgba(10,132,255,0.15);color:#0a84ff;border-radius:4px;'
-            f'padding:1px 7px;font-size:10px;font-weight:600;margin-left:4px">{tag_map[g]}</span>'
-            for g in a["groups"] if g in tag_map
-        )
-        mover_badge = (
-            '<span style="background:rgba(255,214,10,0.15);color:#ffd60a;border-radius:4px;'
-            'padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">MARKET MOVER</span>'
-            if a["high_impact"] else ""
-        )
-        tone_badge = (
-            f'<span style="background:rgba(255,255,255,0.06);border-radius:4px;'
-            f'padding:1px 8px;font-size:10px;font-weight:600;color:{color};margin-left:6px">{label}</span>'
-        )
-        bar_pct = int(abs(a["compound"]) * 100)
+        tag_map  = {"nasdaq": "MNQ/NQ", "sp500": "MES/ES", "gold": "GC/MGC", "macro": "ALL"}
+        tags_str = "  ·  ".join(tag_map[g] for g in a["groups"] if g in tag_map)
+        mover    = "  ⚡ MARKET MOVER" if a["high_impact"] else ""
+        summary  = a["summary"][:200] + ("…" if len(a["summary"]) > 200 else "")
 
-        # Escape all user-supplied text — render each card individually to isolate any bad content
-        safe_title   = html.escape(a["title"][:120])
-        safe_summary = html.escape(a["summary"][:200]) + ("…" if len(a["summary"]) > 200 else "")
-        safe_source  = html.escape(a["source"][:40])
-
-        st.markdown(f"""
-<div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.07);border-left:3px solid {color};
-     border-radius:12px;padding:16px 18px;margin:8px 0;
-     font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif">
-  <div style="display:flex;align-items:flex-start;gap:14px">
-    <div style="flex:1;min-width:0;overflow:hidden">
-      <div style="font-size:13px;font-weight:600;color:#f5f5f7;line-height:1.45;margin-bottom:6px">
-        {safe_title}{mover_badge}
-      </div>
-      <div style="font-size:12px;color:#8e8e93;line-height:1.55;margin-bottom:10px;font-weight:400">
-        {safe_summary}
-      </div>
-      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
-        <span style="font-size:11px;color:#636366;font-weight:400">{safe_source} &middot; {age_str}</span>
-        {tone_badge}{inst_tags}
-      </div>
-    </div>
-    <div style="text-align:right;flex-shrink:0;min-width:54px">
-      <div style="font-size:1.1em;font-weight:700;color:{color};line-height:1">{a['compound']:+.2f}</div>
-      <div style="font-size:9px;color:#636366;margin-top:2px;text-transform:uppercase;letter-spacing:0.05em">mood</div>
-      <div style="background:rgba(255,255,255,0.08);border-radius:3px;height:3px;margin-top:8px">
-        <div style="width:{bar_pct}%;height:100%;background:{color};border-radius:3px"></div>
-      </div>
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
+        # Colored left border via a thin div, then native components for all text
+        st.markdown(
+            f'<div style="border-left:3px solid {color};border-radius:2px;'
+            f'margin:2px 0 0 0;height:4px"></div>',
+            unsafe_allow_html=True
+        )
+        with st.container():
+            c1, c2 = st.columns([6, 1])
+            with c1:
+                st.markdown(f"**{a['title']}{mover}**")
+                st.caption(summary)
+                meta = f"{a['source']} · {age_str}"
+                if tags_str:
+                    meta += f"  ·  {tags_str}"
+                st.caption(f"{label}  ·  {meta}")
+            with c2:
+                st.metric("", f"{a['compound']:+.2f}")
+        st.divider()
 
     # ── Economic event reminder ───────────────────────────────────────────────
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
