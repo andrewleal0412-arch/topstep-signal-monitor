@@ -841,7 +841,7 @@ def check_open_trades(symbol: str, df: pd.DataFrame) -> list:
         elif spacing_min <= 30: iv = "30m"
         else:                   iv = "1h"
         max_period = _MAX_PERIOD.get(iv, "60d")
-        ext = fetch_data(symbol, iv, max_period)
+        ext = _fetch_raw(symbol, iv, max_period)  # bypass cache — must have latest candles
         if not ext.empty and len(ext) > len(df):
             df = ext
     except Exception:
@@ -884,38 +884,37 @@ def check_open_trades(symbol: str, df: pd.DataFrame) -> list:
 
             if d == "LONG":
                 sl_hit  = lo <= sl
-                tp1_hit = hi >= tp1
                 tp2_hit = hi >= tp2
-                if sl_hit and tp1_hit:
-                    # Both SL and TP tagged same candle — can't know which hit first.
-                    # Conservative/honest: call it a loss.
-                    trade.update(status="loss", pnl_ticks=round(-abs(entry - sl) / ti, 1), closed_at=idx.isoformat())
-                    changed = True; break
-                elif sl_hit:
-                    trade.update(status="loss", pnl_ticks=round(-abs(entry - sl) / ti, 1), closed_at=idx.isoformat())
-                    changed = True; break
-                elif tp2_hit:
+                tp1_hit = hi >= tp1
+                if tp2_hit:
                     trade.update(status="win_tp2", pnl_ticks=round(abs(tp2 - entry) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif tp1_hit and sl_hit:
+                    # Both TP1 and SL tagged same candle — price likely ran to TP1 first
+                    trade.update(status="win_tp1", pnl_ticks=round(abs(tp1 - entry) / ti, 1), closed_at=idx.isoformat())
                     changed = True; break
                 elif tp1_hit:
                     trade.update(status="win_tp1", pnl_ticks=round(abs(tp1 - entry) / ti, 1), closed_at=idx.isoformat())
                     changed = True; break
+                elif sl_hit:
+                    trade.update(status="loss", pnl_ticks=round(-abs(entry - sl) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
             else:  # SHORT
                 sl_hit  = hi >= sl
-                tp1_hit = lo <= tp1
                 tp2_hit = lo <= tp2
-                if sl_hit and tp1_hit:
-                    # Both SL and TP tagged same candle — conservative: call it a loss.
-                    trade.update(status="loss", pnl_ticks=round(-abs(sl - entry) / ti, 1), closed_at=idx.isoformat())
-                    changed = True; break
-                elif sl_hit:
-                    trade.update(status="loss", pnl_ticks=round(-abs(sl - entry) / ti, 1), closed_at=idx.isoformat())
-                    changed = True; break
-                elif tp2_hit:
+                tp1_hit = lo <= tp1
+                if tp2_hit:
                     trade.update(status="win_tp2", pnl_ticks=round(abs(entry - tp2) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif tp1_hit and sl_hit:
+                    # Both TP1 and SL tagged same candle — price likely ran to TP1 first
+                    trade.update(status="win_tp1", pnl_ticks=round(abs(entry - tp1) / ti, 1), closed_at=idx.isoformat())
                     changed = True; break
                 elif tp1_hit:
                     trade.update(status="win_tp1", pnl_ticks=round(abs(entry - tp1) / ti, 1), closed_at=idx.isoformat())
+                    changed = True; break
+                elif sl_hit:
+                    trade.update(status="loss", pnl_ticks=round(-abs(sl - entry) / ti, 1), closed_at=idx.isoformat())
                     changed = True; break
 
     if changed:
@@ -958,8 +957,8 @@ def get_adaptive_note(trades: list, symbol: str) -> str:
     return f"Last {len(recent)} trades: {rate*100:.0f}% win rate."
 
 # ─── Data ─────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=30)
-def fetch_data(symbol: str, interval: str, period: str) -> pd.DataFrame:
+def _fetch_raw(symbol: str, interval: str, period: str) -> pd.DataFrame:
+    """Non-cached fetch — used for TP/SL checking so we never miss a hit."""
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
         if df.empty:
@@ -968,6 +967,14 @@ def fetch_data(symbol: str, interval: str, period: str) -> pd.DataFrame:
         return df.dropna()
     except Exception:
         return pd.DataFrame()
+
+@st.cache_data(ttl=15)
+def fetch_data(symbol: str, interval: str, period: str) -> pd.DataFrame:
+    return _fetch_raw(symbol, interval, period)
+
+def _snap(price: float, tick: float) -> float:
+    """Snap a price to the nearest valid tick increment."""
+    return round(round(price / tick) * tick, 10)
 
 # ─── Indicators ───────────────────────────────────────────────────────────────
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -1074,12 +1081,17 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
         except Exception:
             pass
 
+    tick = TICK_INFO.get(symbol, {}).get("tick", 0.25) if symbol else 0.25
     if direction == "LONG":
-        entry, sl = price, round(price - sl_mult * atr, 2)
-        tp1, tp2  = round(price + sl_mult * atr, 2), round(price + sl_mult * 2 * atr, 2)
+        entry = _snap(price, tick)
+        sl    = _snap(price - sl_mult * atr, tick)
+        tp1   = _snap(price + sl_mult * atr, tick)
+        tp2   = _snap(price + sl_mult * 2 * atr, tick)
     elif direction == "SHORT":
-        entry, sl = price, round(price + sl_mult * atr, 2)
-        tp1, tp2  = round(price - sl_mult * atr, 2), round(price - sl_mult * 2 * atr, 2)
+        entry = _snap(price, tick)
+        sl    = _snap(price + sl_mult * atr, tick)
+        tp1   = _snap(price - sl_mult * atr, tick)
+        tp2   = _snap(price - sl_mult * 2 * atr, tick)
     else:
         entry = sl = tp1 = tp2 = None
 
@@ -1969,7 +1981,7 @@ def render_settings_tab():
 
 
 # ─── Dashboard Tab ────────────────────────────────────────────────────────────
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=15)
 def _quick_signal(symbol: str, interval: str, period: str) -> dict:
     """Fetch full signal for dashboard — cached 30s."""
     try:
