@@ -1958,7 +1958,7 @@ def render_dashboard(interval: str, period: str):
             full_sig = sig.get("_full")
             if full_sig and should_record_signal(full_sig, symbol):
                 record_signal(full_sig, symbol, interval)
-            if full_sig and full_sig["direction"] != "NEUTRAL":
+            if full_sig and full_sig["direction"] != "NEUTRAL" and trading_session_active(symbol)[0]:
                 notif_key = f"last_notif_{symbol}"
                 last_notif = st.session_state.get(notif_key)
                 if last_notif is None or (now_pt() - last_notif).total_seconds() > 900:
