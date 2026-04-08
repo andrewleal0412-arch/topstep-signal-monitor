@@ -1362,10 +1362,42 @@ def render_instrument(symbol: str, interval: str, period: str):
 </div>
 """, unsafe_allow_html=True)
 
-    # ── Chart ─────────────────────────────────────────────────────────────────
+    # ── Charts ────────────────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     fig = build_chart(df, signal)
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    # ── TradingView interactive chart ─────────────────────────────────────────
+    _TV_SYMBOLS = {"MNQ=F": "CME_MINI:MNQ1!", "MES=F": "CME_MINI:MES1!", "MGC=F": "COMEX:MGC1!"}
+    _TV_INTERVALS = {"1m":"1","2m":"2","5m":"5","15m":"15","30m":"30","1h":"60"}
+    tv_sym = _TV_SYMBOLS.get(symbol, "CME_MINI:MNQ1!")
+    tv_iv  = _TV_INTERVALS.get(interval, "5")
+
+    with st.expander("TradingView Chart — Interactive", expanded=False):
+        components.html(f"""
+<div class="tradingview-widget-container" style="height:520px;width:100%">
+  <div id="tv_chart_{name}" style="height:100%;width:100%"></div>
+  <script src="https://s3.tradingview.com/tv.js"></script>
+  <script>
+  new TradingView.widget({{
+    "container_id": "tv_chart_{name}",
+    "width":        "100%",
+    "height":       520,
+    "symbol":       "{tv_sym}",
+    "interval":     "{tv_iv}",
+    "timezone":     "America/Los_Angeles",
+    "theme":        "dark",
+    "style":        "1",
+    "locale":       "en",
+    "toolbar_bg":   "#0f1520",
+    "gridColor":    "rgba(255,255,255,0.04)",
+    "hide_top_toolbar": false,
+    "hide_legend":  false,
+    "save_image":   false,
+    "enable_publishing": false
+  }});
+  </script>
+</div>""", height=540)
 
     # ── Row 5: Trade History ──────────────────────────────────────────────────
     sym_trades = [t for t in trades if t["symbol"] == symbol]
