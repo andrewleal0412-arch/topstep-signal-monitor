@@ -693,6 +693,24 @@ def trading_session_active(symbol: str) -> tuple:
 
     return True, "", ""
 
+def trade_in_session(symbol: str, timestamp_str: str) -> bool:
+    """Return True if the trade timestamp falls within an active session for the symbol."""
+    try:
+        ts = datetime.fromisoformat(timestamp_str).astimezone(PT)
+    except Exception:
+        return False
+    weekday = ts.weekday()
+    h = ts.hour + ts.minute / 60.0
+    if weekday == 5:
+        return False
+    if weekday == 6 and h < 15.0:
+        return False
+    if symbol in ("MNQ=F", "MES=F"):
+        return (6.5 <= h < 8.5) or (11.0 <= h < 13.0)
+    if symbol == "MGC=F":
+        return (h < 2.0) or (5.0 <= h < 9.0)
+    return True
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 TOPSTEP_ACCOUNTS = {
     "$50K":  {"target": 3000,  "daily_loss": 1500, "max_dd": 2500,  "contract_limit": 5},
@@ -1659,6 +1677,39 @@ def render_trade_log():
 </div>
 """, unsafe_allow_html=True)
 
+    # ── In-hours vs Off-hours win rates ──────────────────────────────────────
+    closed = [t for t in all_trades if t["status"] != "open"]
+    in_h   = [t for t in closed if trade_in_session(t["symbol"], t["timestamp"])]
+    off_h  = [t for t in closed if not trade_in_session(t["symbol"], t["timestamp"])]
+
+    def _wr(trades_subset):
+        if not trades_subset:
+            return 0, 0, 0
+        wins = sum(1 for t in trades_subset if t["status"].startswith("win"))
+        return round(wins / len(trades_subset) * 100), wins, len(trades_subset) - wins
+
+    in_wr,  in_w,  in_l  = _wr(in_h)
+    off_wr, off_w, off_l = _wr(off_h)
+    in_color  = "#30d158" if in_wr  >= 55 else ("#ffd60a" if in_wr  >= 40 else "#ff375f")
+    off_color = "#30d158" if off_wr >= 55 else ("#ffd60a" if off_wr >= 40 else "#ff375f")
+
+    col_in, col_off = st.columns(2)
+    col_in.markdown(f"""
+<div style="background:#1c1c1e;border:1px solid rgba(52,211,153,0.2);border-radius:12px;padding:16px 20px">
+  <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;color:#34d399;margin-bottom:10px">IN HOURS</div>
+  <div style="font-size:2em;font-weight:800;color:{in_color}">{in_wr}%</div>
+  <div style="font-size:11px;color:#8e8e93;margin-top:4px">{in_w}W / {in_l}L &nbsp;·&nbsp; {len(in_h)} closed trades</div>
+</div>""", unsafe_allow_html=True)
+
+    col_off.markdown(f"""
+<div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:16px 20px">
+  <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;color:#636366;margin-bottom:10px">OFF HOURS</div>
+  <div style="font-size:2em;font-weight:800;color:{off_color}">{off_wr}%</div>
+  <div style="font-size:11px;color:#8e8e93;margin-top:4px">{off_w}W / {off_l}L &nbsp;·&nbsp; {len(off_h)} closed trades</div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
     # ── Per-instrument mini stats ─────────────────────────────────────────────
     if by_sym:
         cols = st.columns(len(by_sym))
@@ -1746,11 +1797,17 @@ def render_trade_log():
             except Exception:
                 ts = t["timestamp"][:16]
 
+            in_sess = trade_in_session(t["symbol"], t["timestamp"])
+            sess_badge = ('<span style="font-size:10px;font-weight:700;color:#34d399">IN HOURS</span>'
+                         if in_sess else
+                         '<span style="font-size:10px;font-weight:700;color:#636366">OFF HOURS</span>')
+
             rows += f"""
 <tr>
   <td style="color:#636366;white-space:nowrap">{ts}</td>
   <td><b style="color:#f5f5f7">{name}</b></td>
   <td>{dir_badge}</td>
+  <td>{sess_badge}</td>
   <td class="mono" style="color:#f5f5f7">{t['entry']:,.2f}</td>
   <td class="mono" style="color:#ff375f">{t['sl']:,.2f}</td>
   <td class="mono" style="color:#30d158">{t['tp1']:,.2f}</td>
@@ -1768,6 +1825,7 @@ def render_trade_log():
     <th>Date / Time (PT)</th>
     <th>Market</th>
     <th>Trade</th>
+    <th>Session</th>
     <th>Entry Price</th>
     <th>Stop</th>
     <th>Target 1</th>
