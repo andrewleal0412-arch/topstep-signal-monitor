@@ -2503,6 +2503,8 @@ def main():
 
     with tab_home:
         render_dashboard(interval, period)
+        st.divider()
+        render_scale_guide(st.session_state.get("rules", TOPSTEP_ACCOUNTS["$50K"]))
 
     with tab_mnq:
         st.divider()
@@ -2524,9 +2526,6 @@ def main():
 
     with tab_settings:
         render_settings_tab()
-
-    st.divider()
-    render_scale_guide(st.session_state.get("rules", TOPSTEP_ACCOUNTS["$50K"]))
 
 if __name__ == "__main__":
     main()
