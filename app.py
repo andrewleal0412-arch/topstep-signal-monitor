@@ -2024,13 +2024,13 @@ def render_dashboard(interval: str, period: str):
     # Note: CME futures require TradingView paid plan — using free proxies that track identically
     qc1, qc2, qc3, qc4 = st.columns([1, 1, 1, 3])
     with qc1:
-        if st.button("MNQ · QQQ", use_container_width=True, key="tv_mnq"):
+        if st.button("MNQ", use_container_width=True, key="tv_mnq"):
             st.session_state["tv_sym"] = "NASDAQ:QQQ"
     with qc2:
-        if st.button("MES · SPY", use_container_width=True, key="tv_mes"):
+        if st.button("MES", use_container_width=True, key="tv_mes"):
             st.session_state["tv_sym"] = "AMEX:SPY"
     with qc3:
-        if st.button("MGC · Gold", use_container_width=True, key="tv_mgc"):
+        if st.button("MGC", use_container_width=True, key="tv_mgc"):
             st.session_state["tv_sym"] = "TVC:GOLD"
     with qc4:
         custom = st.text_input("Search any symbol", placeholder="e.g. AAPL, BTC, SPY, TSLA",
