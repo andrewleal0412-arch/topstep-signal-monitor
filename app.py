@@ -2481,6 +2481,14 @@ def main():
     st.markdown(f"## PaperTrail")
     st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
+    st.markdown("""
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
+     border-radius:8px;padding:8px 14px;margin-top:4px;margin-bottom:2px;
+     font-family:'Inter',sans-serif;font-size:12px;color:#64748b;line-height:1.5">
+  ⚠️ <b style="color:#94a3b8">Not financial advice.</b>
+  PaperTrail generates automated signals for informational purposes only.
+  All trades are taken at your own discretion and risk. Past signal performance does not guarantee future results.
+</div>""", unsafe_allow_html=True)
 
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=30000, debounce=True, key="autorefresh")
