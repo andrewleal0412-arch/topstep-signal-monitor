@@ -276,7 +276,7 @@ def sentiment_label(compound: float) -> tuple:
         return "Mixed / Neutral",  "#8e8e93", "⚪"
 
 st.set_page_config(
-    page_title="TopStep Signal Monitor",
+    page_title="Signal Monitor",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -633,10 +633,10 @@ GLOSSARY = {
     "Crossover":  "When one line crosses another. Fast line above slow line = bullish crossover.",
     "Overbought": "Price rose too fast, may pull back. RSI above 70 signals this.",
     "Oversold":   "Price fell too fast, may bounce. RSI below 30 signals this.",
-    "Drawdown":   "Drop from account peak. TopStep ends your eval if this exceeds the limit.",
+    "Drawdown":   "Drop from account peak. The platform ends your eval if this exceeds the limit.",
     "Daily Loss": "Max you can lose in one trading day. Hit this = stop trading today.",
     "Contract":   "One unit of futures. 1 MNQ = $0.50/tick. 1 MES = $1.25/tick.",
-    "Eval":       "TopStep challenge — trade profitably within rules to earn a real funded account.",
+    "Eval":       "Funded account challenge — trade profitably within rules to earn a real funded account.",
     "Scaling":    "Adding contracts to a winning position to increase profit.",
     "Momentum":   "Speed and strength of a price move. MACD and RSI both measure it.",
     "Support":    "Price level where buyers appear and stop price falling. Acts like a floor.",
@@ -1158,7 +1158,7 @@ def build_chart(df: pd.DataFrame, signal: dict) -> go.Figure:
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 def render_sidebar():
-    st.sidebar.title("TopStep Tracker")
+    st.sidebar.title("Eval Tracker")
     acct = st.sidebar.selectbox("Account Size", list(TOPSTEP_ACCOUNTS.keys()), key="acct")
     rules = TOPSTEP_ACCOUNTS[acct]
 
@@ -1192,7 +1192,7 @@ def render_sidebar():
     elif dd_used >= rules["max_dd"]:
         st.sidebar.error("ACCOUNT BUSTED — Max drawdown hit!")
     elif total_pnl >= rules["target"]:
-        st.sidebar.success("EVAL PASSED! Contact TopStep.")
+        st.sidebar.success("EVAL PASSED! Contact your platform.")
     elif daily_rem < rules["daily_loss"] * 0.25:
         st.sidebar.warning("Low daily loss buffer — trade small")
     else:
@@ -1886,8 +1886,8 @@ def render_scale_guide(rules: dict):
 def render_settings_tab():
     cfg = load_config()
 
-    # ── TopStep Eval Tracker ──────────────────────────────────────────────────
-    st.markdown("### TopStep Eval Tracker")
+    # ── Eval Tracker ──────────────────────────────────────────────────────────
+    st.markdown("### Eval Tracker")
     acct = st.selectbox("Account Size", list(TOPSTEP_ACCOUNTS.keys()), key="acct")
     rules = TOPSTEP_ACCOUNTS[acct]
     # store for use by scale guide in main()
@@ -1920,7 +1920,7 @@ def render_settings_tab():
     elif dd_used >= rules["max_dd"]:
         st.error("ACCOUNT BUSTED — Max drawdown hit!")
     elif total_pnl >= rules["target"]:
-        st.success("EVAL PASSED! Contact TopStep.")
+        st.success("EVAL PASSED! Contact your platform.")
     elif daily_rem < rules["daily_loss"] * 0.25:
         st.warning("Low daily loss buffer — trade small")
     else:
@@ -1965,8 +1965,8 @@ def render_settings_tab():
             try:
                 requests.post(
                     f"https://ntfy.sh/{topic_val}",
-                    data="TopStep Signal Monitor is connected. You will get alerts here when a signal fires.".encode("utf-8"),
-                    headers={"Title": "TopStep - Test Alert", "Priority": "default"},
+                    data="Signal Monitor is connected. You will get alerts here when a signal fires.".encode("utf-8"),
+                    headers={"Title": "Signal Monitor - Test Alert", "Priority": "default"},
                     timeout=5,
                 )
                 st.success("Sent! Check your phone.")
@@ -2090,8 +2090,8 @@ def render_dashboard(interval: str, period: str):
      border-radius:10px;padding:10px 16px;margin-bottom:14px;
      font-family:'Inter',sans-serif;font-size:12px;color:#94a3b8;display:flex;gap:10px;align-items:center">
   <span style="color:#fbbf24;font-weight:700;flex-shrink:0">⚠ Data Notice</span>
-  Prices shown are ~15 min delayed (yfinance free tier) and use continuous contracts (MES=F, MNQ=F, MGC=F) which may differ slightly from the front-month contract on TopStep.
-  Use this app for <b style="color:#f1f5f9">signal direction only</b> — always enter at the live price on your TopStep platform.
+  Prices shown are ~15 min delayed (yfinance free tier) and use continuous contracts (MES=F, MNQ=F, MGC=F) which may differ slightly from the front-month contract on your platform.
+  Use this app for <b style="color:#f1f5f9">signal direction only</b> — always enter at the live price on your trading platform.
 </div>""", unsafe_allow_html=True)
 
     _TV_SYMBOLS = {
@@ -2174,7 +2174,7 @@ def check_auth() -> bool:
     # ── Login form ────────────────────────────────────────────────────────────
     st.markdown("""
 <div style="max-width:380px;margin:80px auto;font-family:'Inter',sans-serif">
-  <div style="font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:6px">TopStep Signal Monitor</div>
+  <div style="font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:6px">Signal Monitor</div>
   <div style="font-size:13px;color:#64748b;margin-bottom:28px">Enter your password to continue</div>
 </div>""", unsafe_allow_html=True)
 
@@ -2204,7 +2204,7 @@ def main():
     if not check_auth():
         st.stop()
 
-    st.markdown(f"## TopStep Signal Monitor")
+    st.markdown(f"## Signal Monitor")
     st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
 
