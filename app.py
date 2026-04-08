@@ -1926,15 +1926,6 @@ def render_settings_tab():
     else:
         st.info(f"Active — max {rules['contract_limit']} contracts")
 
-    # ── Signal Track Record ───────────────────────────────────────────────────
-    all_trades = load_trades()
-    stats = get_stats(all_trades)
-    if stats["total"] > 0:
-        st.divider()
-        st.markdown("**Signal Track Record (All)**")
-        wr_color = "green" if stats["win_rate"] >= 55 else ("orange" if stats["win_rate"] >= 40 else "red")
-        st.markdown(f"**{stats['win_rate']}% win rate** — {stats['wins']}W / {stats['losses']}L / {stats['open']} open")
-
     # ── Phone Alerts ──────────────────────────────────────────────────────────
     st.divider()
     st.markdown("### Phone Alerts")
