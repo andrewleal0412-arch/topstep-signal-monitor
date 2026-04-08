@@ -276,7 +276,7 @@ def sentiment_label(compound: float) -> tuple:
         return "Mixed / Neutral",  "#8e8e93", "⚪"
 
 st.set_page_config(
-    page_title="Signal Monitor",
+    page_title="PaperTrail",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -294,6 +294,7 @@ html, body, [class*="css"], .stApp {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif !important;
     background-color: #080c14 !important;
     color: #e2e8f0 !important;
+    font-size: 15px !important;
 }
 
 /* ── Page background ── */
@@ -310,7 +311,7 @@ section.main > div { background: #080c14 !important; }
     background: transparent !important;
     color: #64748b !important;
     font-family: 'Inter', sans-serif !important;
-    font-size: 13px !important;
+    font-size: 15px !important;
     font-weight: 500 !important;
     padding: 10px 18px !important;
     border-radius: 8px 8px 0 0 !important;
@@ -457,7 +458,7 @@ section.main > div { background: #080c14 !important; }
     margin: 4px 0;
     background: rgba(255,255,255,0.03);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 400;
     color: #cbd5e1;
     border-left: 2px solid transparent;
@@ -469,9 +470,9 @@ section.main > div { background: #080c14 !important; }
 .tl-table { width: 100%; border-collapse: collapse; }
 .tl-table tr { border-bottom: 1px solid rgba(255,255,255,0.04); }
 .tl-table tr:last-child { border-bottom: none; }
-.tl-table td { padding: 9px 8px; font-size: 13px; vertical-align: middle; }
+.tl-table td { padding: 9px 8px; font-size: 15px; vertical-align: middle; }
 .tl-label { color: #475569; font-weight: 500; width: 50px; }
-.tl-price { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; color: #f1f5f9; }
+.tl-price { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; color: #f1f5f9; }
 .tl-meta  { color: #475569; font-size: 11px; text-align: right; }
 .mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
 
@@ -557,7 +558,7 @@ hr { border-color: rgba(255,255,255,0.05) !important; }
     border: 1px solid rgba(255,255,255,0.06) !important;
     border-radius: 10px !important;
     color: #94a3b8 !important;
-    font-size: 13px !important;
+    font-size: 15px !important;
     font-weight: 500 !important;
 }
 .streamlit-expanderContent {
@@ -575,7 +576,7 @@ hr { border-color: rgba(255,255,255,0.05) !important; }
     border-radius: 8px !important;
     font-family: 'Inter', sans-serif !important;
     font-weight: 600 !important;
-    font-size: 13px !important;
+    font-size: 15px !important;
     letter-spacing: 0.01em;
 }
 .stButton > button:hover {
@@ -2200,8 +2201,8 @@ def render_settings_tab():
             try:
                 requests.post(
                     f"https://ntfy.sh/{topic_val}",
-                    data="Signal Monitor is connected. You will get alerts here when a signal fires.".encode("utf-8"),
-                    headers={"Title": "Signal Monitor - Test Alert", "Priority": "default"},
+                    data="PaperTrail is connected. You will get alerts here when a signal fires.".encode("utf-8"),
+                    headers={"Title": "PaperTrail - Test Alert", "Priority": "default"},
                     timeout=5,
                 )
                 st.success("Sent! Check your phone.")
@@ -2447,7 +2448,7 @@ def check_auth() -> bool:
     # ── Login form ────────────────────────────────────────────────────────────
     st.markdown("""
 <div style="max-width:380px;margin:80px auto;font-family:'Inter',sans-serif">
-  <div style="font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:6px">Signal Monitor</div>
+  <div style="font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:6px">PaperTrail</div>
   <div style="font-size:13px;color:#64748b;margin-bottom:28px">Enter your password to continue</div>
 </div>""", unsafe_allow_html=True)
 
@@ -2477,7 +2478,7 @@ def main():
     if not check_auth():
         st.stop()
 
-    st.markdown(f"## Signal Monitor")
+    st.markdown(f"## PaperTrail")
     st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
 
