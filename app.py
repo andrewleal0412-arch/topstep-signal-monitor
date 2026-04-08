@@ -1437,10 +1437,6 @@ def render_instrument(symbol: str, interval: str, period: str):
 </table>
 </div>""", unsafe_allow_html=True)
 
-            if st.button("Clear trade history", key=f"clear_{symbol}"):
-                remaining = [t for t in load_trades() if t["symbol"] != symbol]
-                save_trades(remaining)
-                st.rerun()
         else:
             st.info("No signals recorded yet. Signals are captured automatically when direction changes.")
 
@@ -1768,11 +1764,6 @@ def render_trade_log():
 </div>""", unsafe_allow_html=True)
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        cc1, cc2 = st.columns([1, 5])
-        with cc1:
-            if st.button("Clear all trades", key="clear_all_log", type="secondary"):
-                save_trades([])
-                st.rerun()
     else:
         st.info("No trades match your filters.")
 
