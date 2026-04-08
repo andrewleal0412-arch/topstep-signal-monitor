@@ -2304,11 +2304,10 @@ def main():
     st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
 
-    tf_col, _, ref_col = st.columns([2, 3, 2])
-    with tf_col:
-        interval = st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
-    with ref_col:
-        auto_refresh = st.toggle("Auto Refresh (30s)", value=False)
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=30000, debounce=True, key="autorefresh")
+
+    interval = st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
 
     period_map = {"1m":"7d","2m":"60d","5m":"60d","15m":"60d","30m":"60d","1h":"730d"}
     period = period_map.get(interval, "5d")
@@ -2351,10 +2350,6 @@ def main():
 
     st.divider()
     render_scale_guide(st.session_state.get("rules", TOPSTEP_ACCOUNTS["$50K"]))
-
-    if auto_refresh:
-        from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=30000, debounce=True, key="autorefresh")
 
 if __name__ == "__main__":
     main()
