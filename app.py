@@ -807,15 +807,12 @@ def should_record_signal(signal: dict, symbol: str) -> bool:
     if not sym_trades:
         return True
     last = sym_trades[-1]
-    # Same direction as last trade → skip
-    if last["direction"] == signal["direction"]:
-        return False
-    # Cooldown: 15 min minimum between signals
+    # Cooldown: 30 min minimum between signals (prevents duplicate entries same setup)
     try:
         last_time = datetime.fromisoformat(last["timestamp"])
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
-        if (now_pt() - last_time).total_seconds() < 900:
+        if (now_pt() - last_time).total_seconds() < 1800:
             return False
     except Exception:
         pass
