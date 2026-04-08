@@ -1623,6 +1623,9 @@ def render_trade_log():
 
     all_trades = load_trades()
 
+    # Only show MNQ=F, MES=F, MGC=F — exclude legacy GC=F, NQ=F, ES=F
+    all_trades = [t for t in all_trades if t["symbol"] in TICK_INFO]
+
     if not all_trades:
         st.info("No trades recorded yet. Signals are saved automatically when a direction is detected on any tab.")
         return
@@ -1630,8 +1633,7 @@ def render_trade_log():
     # ── Overall stats across all instruments ─────────────────────────────────
     stats_all = get_stats(all_trades)
     by_sym = {}
-    all_syms = {**TICK_INFO, **_SYMBOL_ALIAS}
-    for sym in all_syms:
+    for sym in TICK_INFO:
         s = get_stats(all_trades, sym)
         if s["total"] > 0 or s["open"] > 0:
             by_sym[sym] = s
@@ -1676,8 +1678,7 @@ def render_trade_log():
 
     # ── Filters ───────────────────────────────────────────────────────────────
     fc1, fc2, fc3 = st.columns(3)
-    _all_ti = {**TICK_INFO, **_SYMBOL_ALIAS}
-    sym_options = ["All"] + [_all_ti[s]["name"] for s in _all_ti
+    sym_options = ["All"] + [TICK_INFO[s]["name"] for s in TICK_INFO
                              if any(t["symbol"] == s for t in all_trades)]
     with fc1:
         f_sym = st.selectbox("Instrument", sym_options, key="log_sym")
