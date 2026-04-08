@@ -1510,32 +1510,52 @@ def render_instrument(symbol: str, interval: str, period: str):
     if not reasons_html:
         reasons_html = '<div class="reason-item">Not enough candle data yet</div>'
 
-    if signal["entry"] is not None:
+    # ── Use open trade levels if one exists (keeps tab consistent with log) ──
+    all_trades   = load_trades()
+    open_trade   = next((t for t in all_trades if t["symbol"] == symbol and t["status"] == "open"), None)
+    display_lvls = None
+    if open_trade:
+        display_lvls = {
+            "entry": open_trade["entry"],
+            "sl":    open_trade["sl"],
+            "tp1":   open_trade["tp1"],
+            "tp2":   open_trade["tp2"],
+        }
+    elif signal["entry"] is not None:
+        display_lvls = {
+            "entry": signal["entry"],
+            "sl":    signal["sl"],
+            "tp1":   signal["tp1"],
+            "tp2":   signal["tp2"],
+        }
+
+    if display_lvls:
         tick_sz   = ti["tick"]
         tick_val  = ti["value"]
-        sl_ticks  = abs(signal["entry"] - signal["sl"])  / tick_sz
-        tp1_ticks = abs(signal["entry"] - signal["tp1"]) / tick_sz
-        tp2_ticks = abs(signal["entry"] - signal["tp2"]) / tick_sz
+        sl_ticks  = abs(display_lvls["entry"] - display_lvls["sl"])  / tick_sz
+        tp1_ticks = abs(display_lvls["entry"] - display_lvls["tp1"]) / tick_sz
+        tp2_ticks = abs(display_lvls["entry"] - display_lvls["tp2"]) / tick_sz
+        locked_note = (' <span style="font-size:10px;color:#fbbf24;font-weight:600">● LIVE TRADE</span>' if open_trade else "")
         levels_html = f"""
 <table class="tl-table">
   <tr>
-    <td class="tl-label">Entry</td>
-    <td class="tl-price mono">{signal['entry']:,.2f}</td>
+    <td class="tl-label">Entry{locked_note}</td>
+    <td class="tl-price mono">{display_lvls['entry']:,.2f}</td>
     <td class="tl-meta">—</td>
   </tr>
   <tr>
     <td class="tl-label" style="color:#ff375f">{tip('Stop','SL')}</td>
-    <td class="tl-price mono" style="color:#ff375f">{signal['sl']:,.2f}</td>
+    <td class="tl-price mono" style="color:#ff375f">{display_lvls['sl']:,.2f}</td>
     <td class="tl-meta" style="color:#ff375f">{sl_ticks:.0f} {tip('ticks','Tick')} &nbsp;· &nbsp;${sl_ticks*tick_val:,.0f}</td>
   </tr>
   <tr>
     <td class="tl-label" style="color:#30d158">{tip('TP1','TP1')}</td>
-    <td class="tl-price mono" style="color:#30d158">{signal['tp1']:,.2f}</td>
+    <td class="tl-price mono" style="color:#30d158">{display_lvls['tp1']:,.2f}</td>
     <td class="tl-meta" style="color:#30d158">{tp1_ticks:.0f} ticks &nbsp;· &nbsp;${tp1_ticks*tick_val:,.0f}</td>
   </tr>
   <tr>
     <td class="tl-label" style="color:#34c759">{tip('TP2','TP2')}</td>
-    <td class="tl-price mono" style="color:#34c759">{signal['tp2']:,.2f}</td>
+    <td class="tl-price mono" style="color:#34c759">{display_lvls['tp2']:,.2f}</td>
     <td class="tl-meta" style="color:#34c759">{tp2_ticks:.0f} ticks &nbsp;· &nbsp;${tp2_ticks*tick_val:,.0f}</td>
   </tr>
   <tr>
