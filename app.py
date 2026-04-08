@@ -49,22 +49,22 @@ def send_notification(symbol: str, signal: dict, ti: dict):
     if not cfg.get("notify_enabled") or not cfg.get("ntfy_topic", "").strip():
         return
 
-    topic   = cfg["ntfy_topic"].strip()
-    score   = signal["score"]
-    min_sc  = cfg.get("min_score", 2.5)
+    topic  = cfg["ntfy_topic"].strip()
+    score  = signal["score"]
+    min_sc = cfg.get("min_score", 2.5)
 
     if abs(score) < min_sc:
         return
 
-    d       = signal["direction"]
-    name    = ti["name"]
-    icon    = "📈" if d == "LONG" else "📉"
+    d        = signal["direction"]
+    name     = ti["name"]
     strength = int(abs(score) / 6.0 * 100)
     tick_sz  = ti["tick"]
     sl_ticks = abs(signal["entry"] - signal["sl"])  / tick_sz
     tp1_ticks= abs(signal["entry"] - signal["tp1"]) / tick_sz
 
-    title = f"{icon} {d} - {name}  |  Score {score:+.1f}  ({strength}% strength)"
+    # No emoji in title — causes latin-1 encoding errors on some servers
+    title = f"{d} - {name} | Score {score:+.1f} ({strength}% strength)"
     body  = (
         f"Entry:  {signal['entry']:,.2f}\n"
         f"Stop:   {signal['sl']:,.2f}  ({sl_ticks:.0f} ticks)\n"
@@ -81,7 +81,7 @@ def send_notification(symbol: str, signal: dict, ti: dict):
             f"https://ntfy.sh/{topic}",
             data=body.encode("utf-8"),
             headers={
-                "Title":    title,
+                "Title":    title.encode("utf-8"),
                 "Priority": priority,
                 "Tags":     tags,
             },
@@ -570,11 +570,17 @@ def load_trades() -> list:
 def save_trades(trades: list):
     try:
         db = _supa()
-        # Delete all and re-insert (keep last 200)
-        db.table("trades").delete().neq("id", "___none___").execute()
+        # Upsert each trade individually — safe, never loses data on partial failure
         rows = [{"id": t["id"], "data": t} for t in trades[-200:]]
         if rows:
-            db.table("trades").insert(rows).execute()
+            db.table("trades").upsert(rows).execute()
+    except Exception:
+        pass
+
+def save_single_trade(trade: dict):
+    """Insert or update one trade — used when recording a new signal."""
+    try:
+        _supa().table("trades").upsert({"id": trade["id"], "data": trade}).execute()
     except Exception:
         pass
 
@@ -621,9 +627,7 @@ def record_signal(signal: dict, symbol: str, interval: str) -> dict:
         "closed_at": None,
         "pnl_ticks": None,
     }
-    trades = load_trades()
-    trades.append(trade)
-    save_trades(trades)
+    save_single_trade(trade)
     send_notification(symbol, signal, TICK_INFO[symbol])
     return trade
 
@@ -720,7 +724,10 @@ def check_open_trades(symbol: str, df: pd.DataFrame) -> list:
                     changed = True; break
 
     if changed:
-        save_trades(trades)
+        # Only upsert the trades that actually changed — safer than bulk delete/reinsert
+        for trade in trades:
+            if trade["status"] != "open" and trade["symbol"] == symbol:
+                save_single_trade(trade)
     return trades
 
 def get_stats(trades: list, symbol: str = None) -> dict:
@@ -1020,6 +1027,15 @@ def render_instrument(symbol: str, interval: str, period: str):
     # ── record new signal (deduplication via JSON file, not session state) ──
     if should_record_signal(signal, symbol):
         record_signal(signal, symbol, interval)
+
+    # ── send notification for any active signal (max once per 15 min per symbol) ──
+    notif_key = f"last_notif_{symbol}"
+    if signal["direction"] != "NEUTRAL":
+        last_notif = st.session_state.get(notif_key, None)
+        now_ts = now_pt()
+        if last_notif is None or (now_ts - last_notif).total_seconds() > 900:
+            send_notification(symbol, signal, TICK_INFO[symbol])
+            st.session_state[notif_key] = now_ts
 
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) > 1 else last
