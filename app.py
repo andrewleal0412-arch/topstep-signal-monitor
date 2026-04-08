@@ -1068,8 +1068,38 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["VWAP"] = (close * df["Volume"]).cumsum() / df["Volume"].cumsum()
     return df
 
+# ─── Higher Timeframe Bias ────────────────────────────────────────────────────
+def get_htf_bias(df: pd.DataFrame) -> int:
+    """
+    Reads 15m candles and returns +1 (bullish), -1 (bearish), or 0 (neutral).
+    Used to confirm or filter 5m entry signals.
+    """
+    if len(df) < 50:
+        return 0
+    last = df.iloc[-1]
+    bias = 0.0
+    # EMA stack
+    if   last["EMA9"] > last["EMA21"] > last["EMA50"]: bias += 2
+    elif last["EMA9"] < last["EMA21"] < last["EMA50"]: bias -= 2
+    elif last["EMA9"] > last["EMA21"]:                  bias += 1
+    else:                                               bias -= 1
+    # MACD
+    if last["MACD"] > last["MACD_signal"]: bias += 1
+    else:                                  bias -= 1
+    # RSI
+    rsi = float(last["RSI"])
+    if   rsi > 55: bias += 0.5
+    elif rsi < 45: bias -= 0.5
+    # VWAP
+    if float(last["Close"]) > float(last["VWAP"]): bias += 0.5
+    else:                                           bias -= 0.5
+
+    if   bias >= 2.0: return  1
+    elif bias <= -2.0: return -1
+    return 0
+
 # ─── Signal Engine ────────────────────────────────────────────────────────────
-def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None) -> dict:
+def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None, htf_bias: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
              "entry": None, "sl": None, "tp1": None, "tp2": None, "atr": 0,
              "price": 0, "rsi": 50, "ema9": 0, "ema21": 0, "ema50": 0, "vwap": 0,
@@ -1140,6 +1170,22 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
         else:
             reasons.append(("bull" if news_adj >= 0 else "bear",
                             f"📰 News is mixed — small influence on signal ({ns_count} articles, {ns_score:+.2f})"))
+
+    # ── Higher timeframe (15m) trend filter ──────────────────────────────────
+    if htf_bias == 1:
+        if score > 0:
+            score += 1.0
+            reasons.append(("bull", "✅ 15m trend confirms bullish — aligned LONG signal"))
+        elif score < 0:
+            score += 1.5
+            reasons.append(("bear", "⚠ 15m trend is bullish — counter-trend SHORT weakened"))
+    elif htf_bias == -1:
+        if score < 0:
+            score -= 1.0
+            reasons.append(("bear", "✅ 15m trend confirms bearish — aligned SHORT signal"))
+        elif score > 0:
+            score -= 1.5
+            reasons.append(("bull", "⚠ 15m trend is bearish — counter-trend LONG weakened"))
 
     score = round(score, 1)
     direction = "LONG" if score >= 2.5 else "SHORT" if score <= -2.5 else "NEUTRAL"
@@ -1310,9 +1356,15 @@ def render_instrument(symbol: str, interval: str, period: str):
         return
 
     df = compute_indicators(df)
+
+    # Higher timeframe (15m) bias for trend confirmation
+    df_15m   = fetch_data(symbol, "15m", "60d")
+    df_15m   = compute_indicators(df_15m) if not df_15m.empty else df_15m
+    htf_bias = get_htf_bias(df_15m) if not df_15m.empty else 0
+
     articles        = fetch_news()
     news_sentiment  = get_news_sentiment(symbol, articles)
-    signal          = generate_signal(df, symbol, news_sentiment)
+    signal          = generate_signal(df, symbol, news_sentiment, htf_bias=htf_bias)
 
     # ── check / update open trades ──
     trades = check_open_trades(symbol, df)
@@ -2080,14 +2132,20 @@ def _quick_signal(symbol: str, interval: str, period: str) -> dict:
         if df.empty:
             return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None}
         df = compute_indicators(df)
+
+        # Higher timeframe (15m) bias
+        df_15m   = fetch_data(symbol, "15m", "60d")
+        df_15m   = compute_indicators(df_15m) if not df_15m.empty else df_15m
+        htf_bias = get_htf_bias(df_15m) if not df_15m.empty else 0
+
         articles       = fetch_news()
         news_sentiment = get_news_sentiment(symbol, articles)
-        sig            = generate_signal(df, symbol, news_sentiment)
+        sig            = generate_signal(df, symbol, news_sentiment, htf_bias=htf_bias)
         check_open_trades(symbol, df)
         price = float(df.iloc[-1]["Close"])
-        return {"direction": sig["direction"], "score": sig["score"], "price": price, "_full": sig}
+        return {"direction": sig["direction"], "score": sig["score"], "price": price, "_full": sig, "htf_bias": htf_bias}
     except Exception:
-        return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None}
+        return {"direction": "NEUTRAL", "score": 0, "price": None, "_full": None, "htf_bias": 0}
 
 def render_dashboard(interval: str, period: str):
     st.markdown("### Market Overview")
@@ -2151,6 +2209,17 @@ def render_dashboard(interval: str, period: str):
                     'color:#fbbf24">⏸ PAUSED</div>'
                 )
 
+            htf = sig.get("htf_bias", 0)
+            if htf == 1:
+                htf_badge = ('<div style="margin-top:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;'
+                             'color:#30d158">▲ 15m BULLISH</div>')
+            elif htf == -1:
+                htf_badge = ('<div style="margin-top:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;'
+                             'color:#ff375f">▼ 15m BEARISH</div>')
+            else:
+                htf_badge = ('<div style="margin-top:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;'
+                             'color:#636366">— 15m NEUTRAL</div>')
+
             with col:
                 st.markdown(f"""
 <div style="background:{bg};border:2px solid {border};border-radius:14px;
@@ -2165,6 +2234,7 @@ def render_dashboard(interval: str, period: str):
   </div>
   <div style="font-size:10px;color:#636366;margin-top:4px">{strength}% strength</div>
   {sess_badge}
+  {htf_badge}
 </div>
 """, unsafe_allow_html=True)
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)

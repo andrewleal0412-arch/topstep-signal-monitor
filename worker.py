@@ -231,8 +231,33 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["VWAP"] = (close * df["Volume"]).cumsum() / df["Volume"].cumsum()
     return df
 
+# ─── Higher Timeframe Bias ────────────────────────────────────────────────────
+def get_htf_bias(df: pd.DataFrame) -> int:
+    """
+    Reads 15m candles and returns +1 (bullish), -1 (bearish), or 0 (neutral).
+    Used to confirm or filter 5m entry signals.
+    """
+    if len(df) < 50:
+        return 0
+    last = df.iloc[-1]
+    bias = 0.0
+    if   last["EMA9"] > last["EMA21"] > last["EMA50"]: bias += 2
+    elif last["EMA9"] < last["EMA21"] < last["EMA50"]: bias -= 2
+    elif last["EMA9"] > last["EMA21"]:                  bias += 1
+    else:                                               bias -= 1
+    if last["MACD"] > last["MACD_signal"]: bias += 1
+    else:                                  bias -= 1
+    rsi = float(last["RSI"])
+    if   rsi > 55: bias += 0.5
+    elif rsi < 45: bias -= 0.5
+    if float(last["Close"]) > float(last["VWAP"]): bias += 0.5
+    else:                                           bias -= 0.5
+    if   bias >= 2.0: return  1
+    elif bias <= -2.0: return -1
+    return 0
+
 # ─── Signal Engine ────────────────────────────────────────────────────────────
-def generate_signal(df: pd.DataFrame, symbol: str, ns: dict) -> dict:
+def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
              "entry": None, "sl": None, "tp1": None, "tp2": None, "atr": 0}
     if len(df) < 50:
@@ -272,6 +297,15 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict) -> dict:
 
     # News
     score += ns.get("adjustment", 0)
+
+    # Higher timeframe (15m) trend filter
+    if htf_bias == 1:
+        if score > 0:  score += 1.0   # aligned LONG
+        elif score < 0: score += 1.5  # counter-trend SHORT weakened
+    elif htf_bias == -1:
+        if score < 0:  score -= 1.0   # aligned SHORT
+        elif score > 0: score -= 1.5  # counter-trend LONG weakened
+
     score  = round(score, 2)
 
     if   score >= 2.5: direction = "LONG"
@@ -446,11 +480,18 @@ def run_once():
             if df.empty:
                 log.warning(f"{symbol}: no data")
                 continue
-            df  = compute_indicators(df)
-            ns  = get_news_sentiment(symbol, articles)
-            sig = generate_signal(df, symbol, ns)
+            df = compute_indicators(df)
 
-            log.info(f"{TICK_INFO[symbol]['name']}  {sig['direction']:7}  score={sig['score']:+.2f}")
+            # Higher timeframe confirmation — fetch 15m separately
+            time.sleep(5)
+            df_15m   = fetch_data(symbol, "15m", "60d")
+            df_15m   = compute_indicators(df_15m) if not df_15m.empty else df_15m
+            htf_bias = get_htf_bias(df_15m) if not df_15m.empty else 0
+
+            ns  = get_news_sentiment(symbol, articles)
+            sig = generate_signal(df, symbol, ns, htf_bias=htf_bias)
+
+            log.info(f"{TICK_INFO[symbol]['name']}  {sig['direction']:7}  score={sig['score']:+.2f}  htf={'BUL' if htf_bias==1 else 'BEA' if htf_bias==-1 else 'NEU'}")
 
             # Always check open trades first
             check_open_trades(symbol, df)
