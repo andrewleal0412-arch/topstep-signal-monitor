@@ -978,8 +978,58 @@ def get_adaptive_note(trades: list, symbol: str) -> str:
     return f"Last {len(recent)} trades: {rate*100:.0f}% win rate."
 
 # ─── Data ─────────────────────────────────────────────────────────────────────
+# Polygon.io real-time futures mapping
+_POLYGON_MAP = {
+    "MNQ=F": "MNQ",
+    "MES=F": "MES",
+    "MGC=F": "MGC",
+}
+_POLYGON_INTERVAL = {
+    "1m":  (1,  "minute"), "2m":  (2,  "minute"), "5m":  (5,  "minute"),
+    "15m": (15, "minute"), "30m": (30, "minute"), "1h":  (1,  "hour"),
+}
+_PERIOD_DAYS = {
+    "7d": 7, "60d": 60, "730d": 365,
+}
+
+def _fetch_polygon(symbol: str, interval: str, period: str) -> pd.DataFrame:
+    """Fetch real-time bars from Polygon.io. Returns empty df if key not set."""
+    try:
+        api_key = st.secrets.get("polygon", {}).get("api_key", "")
+        if not api_key:
+            return pd.DataFrame()
+        ticker = _POLYGON_MAP.get(symbol)
+        if not ticker:
+            return pd.DataFrame()
+        mult, timespan = _POLYGON_INTERVAL.get(interval, (5, "minute"))
+        days = _PERIOD_DAYS.get(period, 7)
+        end_dt   = datetime.now(ZoneInfo("UTC"))
+        start_dt = end_dt - timedelta(days=days)
+        url = (f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/"
+               f"{mult}/{timespan}/"
+               f"{start_dt.strftime('%Y-%m-%d')}/{end_dt.strftime('%Y-%m-%d')}")
+        resp = requests.get(url,
+                            params={"apiKey": api_key, "limit": 50000, "sort": "asc"},
+                            timeout=10)
+        data = resp.json()
+        if data.get("status") not in ("OK", "DELAYED") or not data.get("results"):
+            return pd.DataFrame()
+        rows, idx = [], []
+        for bar in data["results"]:
+            idx.append(datetime.fromtimestamp(bar["t"] / 1000, tz=ZoneInfo("UTC")))
+            rows.append({"Open": bar["o"], "High": bar["h"],
+                         "Low":  bar["l"], "Close": bar["c"],
+                         "Volume": bar.get("v", 0)})
+        df = pd.DataFrame(rows, index=pd.DatetimeIndex(idx))
+        return df.dropna()
+    except Exception:
+        return pd.DataFrame()
+
 def _fetch_raw(symbol: str, interval: str, period: str) -> pd.DataFrame:
-    """Non-cached fetch — used for TP/SL checking so we never miss a hit."""
+    """Try Polygon.io first (real-time). Fall back to yfinance (15-min delayed)."""
+    df = _fetch_polygon(symbol, interval, period)
+    if not df.empty:
+        return df
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
         if df.empty:
@@ -2118,13 +2168,22 @@ def render_dashboard(interval: str, period: str):
     # ── TradingView chart ─────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     st.markdown("### Chart")
-    st.markdown("""
+    _poly_key = st.secrets.get("polygon", {}).get("api_key", "")
+    if _poly_key:
+        st.markdown("""
+<div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
+     border-radius:10px;padding:10px 16px;margin-bottom:14px;
+     font-family:'Inter',sans-serif;font-size:12px;color:#94a3b8;display:flex;gap:10px;align-items:center">
+  <span style="color:#34d399;font-weight:700;flex-shrink:0">● Live Data</span>
+  Real-time CME futures prices via Polygon.io — signals and TP/SL tracking are as accurate as possible.
+</div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("""
 <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.2);
      border-radius:10px;padding:10px 16px;margin-bottom:14px;
      font-family:'Inter',sans-serif;font-size:12px;color:#94a3b8;display:flex;gap:10px;align-items:center">
   <span style="color:#fbbf24;font-weight:700;flex-shrink:0">⚠ Data Notice</span>
-  Prices shown are ~15 min delayed (yfinance free tier) and use continuous contracts (MES=F, MNQ=F, MGC=F) which may differ slightly from the front-month contract on your platform.
-  Use this app for <b style="color:#f1f5f9">signal direction only</b> — always enter at the live price on your trading platform.
+  Prices shown are ~15 min delayed (yfinance free tier). Use this app for signal direction only — always enter at the live price on your trading platform.
 </div>""", unsafe_allow_html=True)
 
     _TV_SYMBOLS = {
