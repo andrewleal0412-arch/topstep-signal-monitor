@@ -515,8 +515,15 @@ section.main > div { background: #080c14 !important; }
 
 /* ── Tooltips ── */
 .tt {
-    position: relative; display: inline; cursor: help;
-    border-bottom: 1px dashed rgba(255,255,255,0.2);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: help;
+}
+.tt-label {
+    border-bottom: 1px dashed rgba(255,255,255,0.25);
+    line-height: 1.2;
 }
 .tt .tt-box {
     visibility: hidden; opacity: 0;
@@ -524,8 +531,8 @@ section.main > div { background: #080c14 !important; }
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 10px; padding: 10px 14px;
     position: absolute; bottom: calc(100% + 8px);
-    left: 50%; transform: translateX(-50%);
-    width: 240px; font-size: 12px; line-height: 1.6;
+    left: 0; transform: none;
+    width: 250px; font-size: 12px; line-height: 1.6;
     z-index: 9999; white-space: normal;
     box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     transition: opacity 0.15s ease; pointer-events: none;
@@ -534,10 +541,9 @@ section.main > div { background: #080c14 !important; }
 .tt:hover .tt-box { visibility: visible; opacity: 1; }
 .tt-icon {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 14px; height: 14px; border-radius: 50%;
+    width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
     background: rgba(129,140,248,0.15); border: 1px solid rgba(129,140,248,0.25);
-    font-size: 9px; font-weight: 700; color: #818cf8;
-    margin-left: 3px; vertical-align: middle; cursor: help; flex-shrink: 0;
+    font-size: 9px; font-weight: 700; color: #818cf8; cursor: help;
 }
 
 /* ── Dividers ── */
@@ -640,7 +646,8 @@ def tip(label: str, key: str = None) -> str:
     defn = GLOSSARY.get(k, GLOSSARY.get(k.upper(), ""))
     if not defn:
         return label
-    return (f'<span class="tt">{label}'
+    return (f'<span class="tt">'
+            f'<span class="tt-label">{label}</span>'
             f'<span class="tt-icon">?</span>'
             f'<span class="tt-box">{defn}</span>'
             f'</span>')
