@@ -1248,8 +1248,8 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
 _CHART_CFG = {
     "displayModeBar": True,
     "displaylogo": False,
-    "scrollZoom": False,   # off — causes glitchy behaviour; use sliders instead
-    "modeBarButtonsToRemove": ["lasso2d", "select2d", "toggleSpikelines", "autoScale2d"],
+    "scrollZoom": False,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d", "toggleSpikelines"],
 }
 
 def _chart_layout(height: int, title: str, yaxis_range=None, rangeslider=False) -> dict:
@@ -1271,7 +1271,7 @@ def _chart_layout(height: int, title: str, yaxis_range=None, rangeslider=False) 
         margin=dict(l=10, r=120, t=28, b=10),
         font=dict(size=11, color="#94a3b8"),
         hovermode="x unified",
-        dragmode="pan",          # default: drag to pan
+        dragmode="zoom",         # drag chart = box zoom, drag y-axis = zoom y
         xaxis=xaxis,
         yaxis=yaxis,
         legend=dict(orientation="h", y=1.06, x=0,
