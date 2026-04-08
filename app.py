@@ -2085,6 +2085,14 @@ def render_dashboard(interval: str, period: str):
     # ── TradingView chart ─────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     st.markdown("### Chart")
+    st.markdown("""
+<div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.2);
+     border-radius:10px;padding:10px 16px;margin-bottom:14px;
+     font-family:'Inter',sans-serif;font-size:12px;color:#94a3b8;display:flex;gap:10px;align-items:center">
+  <span style="color:#fbbf24;font-weight:700;flex-shrink:0">⚠ Data Notice</span>
+  Prices shown are ~15 min delayed (yfinance free tier) and use continuous contracts (MES=F, MNQ=F, MGC=F) which may differ slightly from the front-month contract on TopStep.
+  Use this app for <b style="color:#f1f5f9">signal direction only</b> — always enter at the live price on your TopStep platform.
+</div>""", unsafe_allow_html=True)
 
     _TV_SYMBOLS = {
         "MNQ": "CME_MINI:MNQ1!",
@@ -2139,15 +2147,6 @@ def render_dashboard(interval: str, period: str):
   }});
   </script>
 </div>""", height=580)
-
-    st.markdown("""
-<div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.2);
-     border-radius:10px;padding:10px 16px;margin-top:8px;
-     font-family:'Inter',sans-serif;font-size:12px;color:#94a3b8;display:flex;gap:10px;align-items:center">
-  <span style="color:#fbbf24;font-weight:700;flex-shrink:0">⚠ Data Notice</span>
-  Prices shown are ~15 min delayed (yfinance free tier) and use continuous contracts (MES=F, MNQ=F, MGC=F) which may differ slightly from the front-month contract on TopStep.
-  Use this app for <b style="color:#f1f5f9">signal direction only</b> — always enter at the live price on your TopStep platform.
-</div>""", unsafe_allow_html=True)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
