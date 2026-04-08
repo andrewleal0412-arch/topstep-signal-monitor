@@ -601,6 +601,10 @@ hr { border-color: rgba(255,255,255,0.05) !important; }
 section[data-testid="stSidebar"] { display: none !important; }
 .block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
 div[data-testid="stVerticalBlock"] > div { gap: 0rem; }
+
+/* ── Prevent page dimming on auto-refresh / cache rerun ── */
+[data-stale="true"] { opacity: 1 !important; }
+.stApp [data-stale="true"] * { opacity: 1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
