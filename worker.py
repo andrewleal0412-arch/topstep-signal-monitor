@@ -416,6 +416,7 @@ def run_once():
     log.info("── Checking all symbols ──")
     articles = fetch_news()
     for symbol in SYMBOLS:
+        time.sleep(8)  # avoid Yahoo Finance rate limiting
         try:
             df = fetch_data(symbol, INTERVAL, PERIOD)
             if df.empty:
