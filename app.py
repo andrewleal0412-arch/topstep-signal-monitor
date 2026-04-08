@@ -2478,7 +2478,12 @@ def main():
     if not check_auth():
         st.stop()
 
-    st.markdown(f"## PaperTrail")
+    st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@700&display=swap" rel="stylesheet">
+<div style="font-family:'Sora',sans-serif;font-size:42px;font-weight:700;
+     letter-spacing:-0.02em;color:#f1f5f9;line-height:1;margin-bottom:4px">
+  Paper<span style="color:#6366f1">Trail</span>
+</div>""", unsafe_allow_html=True)
     st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
     st.markdown("""
