@@ -193,16 +193,24 @@ def get_news_sentiment(symbol: str, articles: list) -> dict:
 
 # ─── Data & Indicators ────────────────────────────────────────────────────────
 def fetch_data(symbol: str, interval: str = "5m", period: str = "60d") -> pd.DataFrame:
-    try:
-        df = yf.download(symbol, period=period, interval=interval,
-                         progress=False, auto_adjust=True)
-        if df.empty:
-            return pd.DataFrame()
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        return df.dropna()
-    except Exception as e:
-        log.error(f"fetch_data {symbol}: {e}")
-        return pd.DataFrame()
+    for attempt in range(3):
+        try:
+            df = yf.download(symbol, period=period, interval=interval,
+                             progress=False, auto_adjust=True)
+            if df.empty:
+                return pd.DataFrame()
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            return df.dropna()
+        except Exception as e:
+            if "Rate" in str(e) or "Too Many" in str(e):
+                wait = 20 * (attempt + 1)
+                log.warning(f"{symbol}: rate limited, retrying in {wait}s")
+                time.sleep(wait)
+            else:
+                log.error(f"fetch_data {symbol}: {e}")
+                return pd.DataFrame()
+    log.error(f"fetch_data {symbol}: all retries failed")
+    return pd.DataFrame()
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if len(df) < 50:
@@ -432,7 +440,7 @@ def run_once():
     log.info("── tick ──")
     articles = fetch_news()
     for symbol in TICK_INFO:
-        time.sleep(6)   # avoid yfinance rate limiting
+        time.sleep(15)  # avoid yfinance rate limiting
         try:
             df = fetch_data(symbol, "5m", "60d")
             if df.empty:
