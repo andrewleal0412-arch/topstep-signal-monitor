@@ -144,7 +144,7 @@ ECON_EVENTS = [
     {"name": "FOMC Minutes",         "desc": "Released 3 weeks after FOMC — shows Fed's internal debate.",                          "impact": "MED"},
 ]
 
-@st.cache_data(ttl=300)  # refresh news every 5 minutes
+@st.cache_data(ttl=300, show_spinner=False)  # refresh news every 5 minutes
 def fetch_news() -> list:
     """Pull headlines from RSS feeds and score them with VADER sentiment."""
     articles = []
@@ -1039,7 +1039,7 @@ def _fetch_raw(symbol: str, interval: str, period: str) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=15, show_spinner=False)
 def fetch_data(symbol: str, interval: str, period: str) -> pd.DataFrame:
     return _fetch_raw(symbol, interval, period)
 
@@ -2068,7 +2068,7 @@ def render_settings_tab():
 
 
 # ─── Dashboard Tab ────────────────────────────────────────────────────────────
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=15, show_spinner=False)
 def _quick_signal(symbol: str, interval: str, period: str) -> dict:
     """Fetch full signal for dashboard — cached 30s."""
     try:
