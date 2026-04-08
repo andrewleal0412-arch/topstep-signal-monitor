@@ -2021,23 +2021,24 @@ def render_dashboard(interval: str, period: str):
     tv_iv = _TV_INTERVALS.get(interval, "5")
 
     # Quick-select buttons + custom search
+    # Note: CME futures require TradingView paid plan — using free proxies that track identically
     qc1, qc2, qc3, qc4 = st.columns([1, 1, 1, 3])
     with qc1:
-        if st.button("MNQ", use_container_width=True, key="tv_mnq"):
-            st.session_state["tv_sym"] = "CME_MINI:MNQ1!"
+        if st.button("MNQ · QQQ", use_container_width=True, key="tv_mnq"):
+            st.session_state["tv_sym"] = "NASDAQ:QQQ"
     with qc2:
-        if st.button("MES", use_container_width=True, key="tv_mes"):
-            st.session_state["tv_sym"] = "CME_MINI:MES1!"
+        if st.button("MES · SPY", use_container_width=True, key="tv_mes"):
+            st.session_state["tv_sym"] = "AMEX:SPY"
     with qc3:
-        if st.button("MGC", use_container_width=True, key="tv_mgc"):
-            st.session_state["tv_sym"] = "COMEX:MGC1!"
+        if st.button("MGC · Gold", use_container_width=True, key="tv_mgc"):
+            st.session_state["tv_sym"] = "TVC:GOLD"
     with qc4:
-        custom = st.text_input("Search any symbol", placeholder="e.g. AAPL, BTC, SPY, ES1!",
+        custom = st.text_input("Search any symbol", placeholder="e.g. AAPL, BTC, SPY, TSLA",
                                key="tv_custom", label_visibility="collapsed")
         if custom:
             st.session_state["tv_sym"] = custom.upper().strip()
 
-    tv_sym = st.session_state.get("tv_sym", "CME_MINI:MNQ1!")
+    tv_sym = st.session_state.get("tv_sym", "NASDAQ:QQQ")
 
     components.html(f"""
 <div class="tradingview-widget-container" style="height:560px;width:100%">
