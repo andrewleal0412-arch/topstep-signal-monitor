@@ -1484,12 +1484,18 @@ def render_news_tab():
             meta_parts.append(tags_str)
         meta_html = " &nbsp;·&nbsp; ".join(meta_parts)
 
+        link_s = html.escape(a.get("link", ""))
+        title_el = (f'<a href="{link_s}" target="_blank" rel="noopener noreferrer" '
+                    f'style="color:#f1f5f9;text-decoration:none;'
+                    f'border-bottom:1px solid rgba(129,140,248,0.35)">{title_s}</a>'
+                    if link_s else title_s)
+
         cards_html += f"""
 <div style="display:flex;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
   <div style="width:3px;min-height:60px;background:{color};border-radius:2px;flex-shrink:0"></div>
   <div style="flex:1;min-width:0">
-    <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#f1f5f9;
-         line-height:1.45;margin-bottom:5px">{title_s}{mover_html}</div>
+    <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;
+         line-height:1.45;margin-bottom:5px">{title_el}{mover_html}</div>
     <div style="font-family:'Inter',sans-serif;font-size:12px;color:#64748b;
          line-height:1.5;margin-bottom:6px">{summary_s}</div>
     <div style="font-family:'Inter',sans-serif;font-size:11px;color:#475569">
