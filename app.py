@@ -550,7 +550,7 @@ section.main > div { background: #080c14 !important; }
 }
 
 /* ── Dividers ── */
-hr { border-color: rgba(255,255,255,0.05) !important; }
+hr { border-color: rgba(255,255,255,0.15) !important; border-width: 2px !important; }
 
 /* ── Expanders ── */
 .streamlit-expanderHeader {
