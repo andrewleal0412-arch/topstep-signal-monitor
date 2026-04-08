@@ -652,6 +652,45 @@ def tip(label: str, key: str = None) -> str:
             f'<span class="tt-box">{defn}</span>'
             f'</span>')
 
+# ─── Trading Session Gate ─────────────────────────────────────────────────────
+def trading_session_active(symbol: str) -> tuple:
+    """Return (is_active: bool, reason: str, next_window: str)."""
+    now     = now_pt()
+    weekday = now.weekday()          # 0=Mon … 6=Sun
+    h       = now.hour + now.minute / 60.0  # fractional hour in PT
+
+    # Saturday — fully closed
+    if weekday == 5:
+        return False, "Markets closed — Saturday", "Sunday 3:00 PM PT"
+
+    # Sunday before futures reopen (6 PM ET = 3 PM PT)
+    if weekday == 6 and h < 15.0:
+        return False, "Markets closed — reopens Sunday 3:00 PM PT", "3:00 PM PT today"
+
+    if symbol in ("MNQ=F", "MES=F"):
+        if 6.5 <= h < 8.5:
+            return True,  "Market open session (6:30–8:30 AM PT)", ""
+        if 11.0 <= h < 13.0:
+            return True,  "Power hour / close session (11:00 AM–1:00 PM PT)", ""
+        if 8.5 <= h < 11.0:
+            return False, "Midday chop — signals paused", "11:00 AM PT"
+        if 13.0 <= h:
+            return False, "After-hours — signals paused", "6:30 AM PT tomorrow"
+        # Overnight (h < 6.5)
+        return False, "Pre-market — signals paused", "6:30 AM PT"
+
+    if symbol == "MGC=F":
+        if h < 2.0:
+            return True,  "London session (12:00–2:00 AM PT)", ""
+        if 5.0 <= h < 9.0:
+            return True,  "COMEX / NY open session (5:00–9:00 AM PT)", ""
+        if 2.0 <= h < 5.0:
+            return False, "Between London & COMEX — signals paused", "5:00 AM PT"
+        # h >= 9.0
+        return False, "Outside gold sessions — signals paused", "12:00 AM PT"
+
+    return True, "", ""
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 TOPSTEP_ACCOUNTS = {
     "$50K":  {"target": 3000,  "daily_loss": 1500, "max_dd": 2500,  "contract_limit": 5},
@@ -707,11 +746,15 @@ def save_single_trade(trade: dict):
 def should_record_signal(signal: dict, symbol: str) -> bool:
     """Only record a new signal if:
     - Direction is not NEUTRAL
+    - Currently in an optimal trading session for this symbol
     - No open trade already exists for this symbol (max 1 per symbol)
     - Direction changed from last recorded trade
     - At least 15 min since last trade on this symbol
     """
     if signal["direction"] == "NEUTRAL":
+        return False
+    active, _, _ = trading_session_active(symbol)
+    if not active:
         return False
     trades = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
@@ -1157,9 +1200,9 @@ def render_instrument(symbol: str, interval: str, period: str):
     if should_record_signal(signal, symbol):
         record_signal(signal, symbol, interval)
 
-    # ── send notification for any active signal (max once per 15 min per symbol) ──
+    # ── send notification for any active signal (only during optimal sessions) ──
     notif_key = f"last_notif_{symbol}"
-    if signal["direction"] != "NEUTRAL":
+    if signal["direction"] != "NEUTRAL" and trading_session_active(symbol)[0]:
         last_notif = st.session_state.get(notif_key, None)
         now_ts = now_pt()
         if last_notif is None or (now_ts - last_notif).total_seconds() > 900:
@@ -1205,6 +1248,29 @@ def render_instrument(symbol: str, interval: str, period: str):
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+    # ── Session status banner ────────────────────────────────────────────────
+    sess_active, sess_reason, sess_next = trading_session_active(symbol)
+    if sess_active:
+        st.markdown(f"""
+<div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
+     border-radius:10px;padding:9px 16px;margin-bottom:12px;
+     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
+  <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
+       box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
+  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE SESSION</span>
+  <span style="font-size:12px;color:#64748b">— {sess_reason}</span>
+</div>""", unsafe_allow_html=True)
+    else:
+        next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
+        st.markdown(f"""
+<div style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.18);
+     border-radius:10px;padding:9px 16px;margin-bottom:12px;
+     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
+  <span style="width:8px;height:8px;border-radius:50%;background:#fbbf24;flex-shrink:0"></span>
+  <span style="font-size:12px;font-weight:600;color:#fbbf24">SIGNALS PAUSED</span>
+  <span style="font-size:12px;color:#64748b">— {sess_reason}{next_str}</span>
+</div>""", unsafe_allow_html=True)
 
     # ── Signal banner (full-width) ────────────────────────────────────────────
     d        = signal["direction"]

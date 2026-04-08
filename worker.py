@@ -293,9 +293,34 @@ def generate_signal(df: pd.DataFrame, symbol: str, news_sentiment: dict) -> dict
         "reasons":   [],
     }
 
+# ─── Trading Session Gate ─────────────────────────────────────────────────────
+def trading_session_active(symbol: str) -> bool:
+    now     = now_pt()
+    weekday = now.weekday()
+    h       = now.hour + now.minute / 60.0
+
+    if weekday == 5:                       # Saturday — closed
+        return False
+    if weekday == 6 and h < 15.0:         # Sunday before 3 PM PT
+        return False
+
+    if symbol in ("MNQ=F", "MES=F"):
+        if 6.5 <= h < 8.5:   return True  # NYSE open
+        if 11.0 <= h < 13.0: return True  # power hour / close
+        return False                       # midday chop or overnight
+
+    if symbol == "MGC=F":
+        if h < 2.0:          return True  # London session
+        if 5.0 <= h < 9.0:  return True  # COMEX / NY morning
+        return False
+
+    return True
+
 # ─── Trade logic ─────────────────────────────────────────────────────────────
 def should_record(signal: dict, symbol: str) -> bool:
     if signal["direction"] == "NEUTRAL":
+        return False
+    if not trading_session_active(symbol):
         return False
     trades     = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
@@ -428,7 +453,8 @@ def run_once():
             ns  = get_news_sentiment(symbol, articles)
             sig = generate_signal(df, symbol, ns)
 
-            log.info(f"{TICK_INFO[symbol]['name']:5s}  {sig['direction']:7s}  score {sig['score']:+.2f}")
+            sess = trading_session_active(symbol)
+            log.info(f"{TICK_INFO[symbol]['name']:5s}  {sig['direction']:7s}  score {sig['score']:+.2f}  session={'ON' if sess else 'OFF'}")
 
             check_open_trades(symbol, df)
 
