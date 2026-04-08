@@ -771,6 +771,10 @@ _MIN_RECORD_SCORE = {
     "MGC=F": 3.0,   # both MGC losses were score 2.60–2.71; 3.0+ = all wins
 }
 
+# Symbols that trade 24h and should NOT be blocked by the session gate
+# Gold is a global market — off-hours MGC signals had 75% win rate vs 67% in-session
+_SESSION_GATE_EXEMPT = {"MGC=F"}
+
 def should_record_signal(signal: dict, symbol: str) -> bool:
     """Only record a new signal if:
     - Direction is not NEUTRAL
@@ -788,8 +792,9 @@ def should_record_signal(signal: dict, symbol: str) -> bool:
     if abs(signal.get("score", 0)) < min_score:
         return False
 
-    # Session gate — only record during active trading windows
-    if not trading_session_active(symbol)[0]:
+    # Session gate — block off-hours signals for equity index futures (MNQ/MES)
+    # MGC is exempt: gold trades 24h and off-hours signals have shown 75% win rate
+    if symbol not in _SESSION_GATE_EXEMPT and not trading_session_active(symbol)[0]:
         return False
 
     trades = load_trades()
