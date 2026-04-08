@@ -1246,26 +1246,33 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
 
 # ─── Chart ────────────────────────────────────────────────────────────────────
 _CHART_CFG = {
-    "displayModeBar": True, "displaylogo": False, "scrollZoom": True,
-    "modeBarButtonsToRemove": ["autoScale2d", "lasso2d", "select2d", "toggleSpikelines"],
+    "displayModeBar": True,
+    "displaylogo": False,
+    "scrollZoom": False,   # off — causes glitchy behaviour; use sliders instead
+    "modeBarButtonsToRemove": ["lasso2d", "select2d", "toggleSpikelines", "autoScale2d"],
 }
 
-def _chart_layout(height: int, title: str, yaxis_range=None) -> dict:
+def _chart_layout(height: int, title: str, yaxis_range=None, rangeslider=False) -> dict:
     yaxis = dict(gridcolor="rgba(255,255,255,0.04)", zeroline=False,
-                 tickfont=dict(size=11), side="right")
+                 tickfont=dict(size=11), side="right",
+                 fixedrange=False)   # allow y-axis drag-to-zoom
     if yaxis_range:
         yaxis["range"] = yaxis_range
+    xaxis = dict(
+        gridcolor="rgba(255,255,255,0.04)",
+        showspikes=True, spikecolor="rgba(255,255,255,0.18)",
+        spikethickness=1, spikedash="dot",
+        rangeslider=dict(visible=rangeslider, thickness=0.04,
+                         bgcolor="#0d1420", bordercolor="#1e293b", borderwidth=1),
+    )
     return dict(
         template="plotly_dark", paper_bgcolor="#0a0f1a", plot_bgcolor="#0a0f1a",
         height=height,
         margin=dict(l=10, r=120, t=28, b=10),
         font=dict(size=11, color="#94a3b8"),
-        hovermode="x unified", dragmode="pan",
-        xaxis=dict(
-            gridcolor="rgba(255,255,255,0.04)", rangeslider_visible=False,
-            showspikes=True, spikecolor="rgba(255,255,255,0.18)",
-            spikethickness=1, spikedash="dot",
-        ),
+        hovermode="x unified",
+        dragmode="pan",          # default: drag to pan
+        xaxis=xaxis,
         yaxis=yaxis,
         legend=dict(orientation="h", y=1.06, x=0,
                     font=dict(size=11, color="#94a3b8"), bgcolor="rgba(0,0,0,0)"),
@@ -1317,7 +1324,7 @@ def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -
         _hline_annotation(fig, lvls["tp1"],   "#26a65b",   "dash",  1.5, "TP1  ")
         _hline_annotation(fig, lvls["tp2"],   "#34d399",   "dot",   1.2, "TP2  ")
 
-    fig.update_layout(**_chart_layout(520, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB"))
+    fig.update_layout(**_chart_layout(560, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB", rangeslider=True))
     return fig
 
 def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
