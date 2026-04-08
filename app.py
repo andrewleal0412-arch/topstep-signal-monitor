@@ -2117,9 +2117,8 @@ def main():
     render_scale_guide(st.session_state.get("rules", TOPSTEP_ACCOUNTS["$50K"]))
 
     if auto_refresh:
-        time.sleep(30)
-        st.cache_data.clear()
-        st.rerun()
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=30000, debounce=True, key="autorefresh")
 
 if __name__ == "__main__":
     main()
