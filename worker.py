@@ -377,8 +377,14 @@ def check_open_trades(symbol: str, df: pd.DataFrame):
             sig_time = datetime.fromisoformat(trade["timestamp"])
             if sig_time.tzinfo is None:
                 sig_time = sig_time.replace(tzinfo=PT)
-            sig_time = sig_time.astimezone(df.index.tz) if df.index.tz else sig_time.replace(tzinfo=None)
-            after = df[df.index > sig_time]
+            if df.index.tz is not None:
+                sig_time = sig_time.astimezone(df.index.tz)
+                after = df[df.index > sig_time]
+            else:
+                # df index is naive UTC — convert PT time to UTC then strip tz
+                from zoneinfo import ZoneInfo as _ZI
+                sig_time_utc = sig_time.astimezone(_ZI("UTC")).replace(tzinfo=None)
+                after = df[df.index > sig_time_utc]
         except Exception:
             continue
 

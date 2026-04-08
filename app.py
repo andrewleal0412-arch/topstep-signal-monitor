@@ -836,12 +836,17 @@ def check_open_trades(symbol: str, df: pd.DataFrame) -> list:
 
         try:
             sig_time = datetime.fromisoformat(trade["timestamp"])
-            # make sig_time timezone-aware if df index has tz
-            if df.index.tz is not None and sig_time.tzinfo is None:
+            if sig_time.tzinfo is None:
                 sig_time = sig_time.replace(tzinfo=PT)
-            elif df.index.tz is not None:
+            if df.index.tz is not None:
+                # df index is tz-aware — align sig_time to same tz
                 sig_time = sig_time.astimezone(df.index.tz)
-            after = df[df.index > sig_time]
+                after = df[df.index > sig_time]
+            else:
+                # df index is naive UTC — convert sig_time to UTC then strip tz
+                from zoneinfo import ZoneInfo as _ZI
+                sig_time_utc = sig_time.astimezone(_ZI("UTC")).replace(tzinfo=None)
+                after = df[df.index > sig_time_utc]
         except Exception:
             continue
 
