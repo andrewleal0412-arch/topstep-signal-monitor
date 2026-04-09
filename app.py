@@ -1238,6 +1238,96 @@ def detect_fvg(df: pd.DataFrame) -> dict:
 
     return result
 
+# ─── Candlestick Pattern Detection ────────────────────────────────────────────
+def detect_candle_patterns(df: pd.DataFrame) -> dict:
+    """Detect key candlestick reversal/continuation patterns on last closed candles."""
+    result = {"score": 0.0, "patterns": []}
+    if len(df) < 5:
+        return result
+
+    c1, c2, c3 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+    o1, h1, l1, cl1 = float(c1["Open"]), float(c1["High"]), float(c1["Low"]), float(c1["Close"])
+    o2, h2, l2, cl2 = float(c2["Open"]), float(c2["High"]), float(c2["Low"]), float(c2["Close"])
+    o3, h3, l3, cl3 = float(c3["Open"]), float(c3["High"]), float(c3["Low"]), float(c3["Close"])
+
+    body1, body2 = abs(cl1 - o1), abs(cl2 - o2)
+    range1 = h1 - l1 if h1 != l1 else 0.001
+    range2 = h2 - l2 if h2 != l2 else 0.001
+    upper_wick1 = h1 - max(o1, cl1)
+    lower_wick1 = min(o1, cl1) - l1
+
+    if cl2 < o2 and cl1 > o1 and cl1 > o2 and o1 < cl2:
+        result["score"] += 1.0; result["patterns"].append("bullish engulfing")
+    if cl2 > o2 and cl1 < o1 and cl1 < o2 and o1 > cl2:
+        result["score"] -= 1.0; result["patterns"].append("bearish engulfing")
+    if body1 > 0 and lower_wick1 >= 2.0 * body1 and upper_wick1 < body1 and cl1 > o1:
+        result["score"] += 0.75; result["patterns"].append("hammer")
+    if body1 > 0 and upper_wick1 >= 2.0 * body1 and lower_wick1 < body1 and cl1 < o1:
+        result["score"] -= 0.75; result["patterns"].append("shooting star")
+    if lower_wick1 >= 0.66 * range1 and cl1 > o1 and "hammer" not in result["patterns"]:
+        result["score"] += 0.5; result["patterns"].append("bullish pin bar")
+    if upper_wick1 >= 0.66 * range1 and cl1 < o1 and "shooting star" not in result["patterns"]:
+        result["score"] -= 0.5; result["patterns"].append("bearish pin bar")
+
+    c3_mid = (o3 + cl3) / 2
+    small_body2 = body2 < 0.4 * range2
+    if cl3 < o3 and small_body2 and cl1 > o1 and cl1 > c3_mid and body1 > body2 * 2:
+        result["score"] += 1.0; result["patterns"].append("morning star")
+    if cl3 > o3 and small_body2 and cl1 < o1 and cl1 < c3_mid and body1 > body2 * 2:
+        result["score"] -= 1.0; result["patterns"].append("evening star")
+
+    if body1 < 0.1 * range1:
+        result["patterns"].append("doji")
+
+    return result
+
+# ─── Support & Resistance Detection ──────────────────────────────────────────
+def detect_sr_levels(df: pd.DataFrame, lookback: int = 80) -> dict:
+    """Detect support & resistance from swing highs/lows, clustered into zones."""
+    result = {"support": [], "resistance": [],
+              "nearest_support": None, "nearest_resistance": None,
+              "at_support": False, "at_resistance": False}
+    if len(df) < lookback:
+        lookback = len(df) - 4
+    if lookback < 10:
+        return result
+
+    highs, lows = df["High"].values, df["Low"].values
+    price = float(df["Close"].iloc[-1])
+    swing_highs, swing_lows = [], []
+    start = len(df) - lookback
+    for i in range(start + 2, len(df) - 2):
+        if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+            swing_highs.append(float(highs[i]))
+        if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+            swing_lows.append(float(lows[i]))
+
+    def cluster(levels, threshold_pct=0.0015):
+        if not levels: return []
+        levels = sorted(levels)
+        clusters, group = [], [levels[0]]
+        for lv in levels[1:]:
+            if abs(lv - group[0]) / group[0] < threshold_pct:
+                group.append(lv)
+            else:
+                clusters.append(sum(group) / len(group))
+                group = [lv]
+        clusters.append(sum(group) / len(group))
+        return clusters
+
+    result["resistance"] = cluster(swing_highs)
+    result["support"]    = cluster(swing_lows)
+    supports_below = [s for s in result["support"] if s < price]
+    resist_above   = [r for r in result["resistance"] if r > price]
+    if supports_below: result["nearest_support"] = max(supports_below)
+    if resist_above:   result["nearest_resistance"] = min(resist_above)
+    threshold = price * 0.003
+    if result["nearest_support"] and abs(price - result["nearest_support"]) < threshold:
+        result["at_support"] = True
+    if result["nearest_resistance"] and abs(price - result["nearest_resistance"]) < threshold:
+        result["at_resistance"] = True
+    return result
+
 # ─── Signal Engine ────────────────────────────────────────────────────────────
 def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None, htf_bias_15m: int = 0, htf_bias_1h: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
@@ -1365,6 +1455,38 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
             # Unfilled bearish FVG above — acts as resistance
             score -= 0.5
             reasons.append(("bear", f"🟥 Unfilled bearish FVG above at {nd['bottom']:,.2f}–{nd['top']:,.2f} — nearby resistance"))
+
+    # ── Candlestick pattern scoring ──────────────────────────────────────────
+    candles = detect_candle_patterns(df)
+    score += candles["score"]
+    for p in candles["patterns"]:
+        if p in ("bullish engulfing", "hammer", "morning star", "bullish pin bar"):
+            reasons.append(("bull", f"🕯 Candle pattern: {p} — bullish reversal signal"))
+        elif p in ("bearish engulfing", "shooting star", "evening star", "bearish pin bar"):
+            reasons.append(("bear", f"🕯 Candle pattern: {p} — bearish reversal signal"))
+        elif p == "doji":
+            reasons.append(("bear" if score < 0 else "bull", f"🕯 Doji detected — indecision, watch for reversal"))
+
+    # ── Support & Resistance scoring ─────────────────────────────────────────
+    sr = detect_sr_levels(df)
+    if sr["at_support"]:
+        score += 1.0
+        reasons.append(("bull", f"🛡 Price at support level ({sr['nearest_support']:,.2f}) — potential bounce"))
+    if sr["at_resistance"]:
+        score -= 1.0
+        reasons.append(("bear", f"🧱 Price at resistance level ({sr['nearest_resistance']:,.2f}) — potential rejection"))
+    if score > 0 and sr["nearest_resistance"]:
+        room = sr["nearest_resistance"] - float(last["Close"])
+        atr_val = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
+        if room < 0.5 * atr_val:
+            score -= 0.75
+            reasons.append(("bear", f"⚠ Resistance at {sr['nearest_resistance']:,.2f} too close — limited upside"))
+    if score < 0 and sr["nearest_support"]:
+        room = float(last["Close"]) - sr["nearest_support"]
+        atr_val = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
+        if room < 0.5 * atr_val:
+            score += 0.75
+            reasons.append(("bull", f"⚠ Support at {sr['nearest_support']:,.2f} too close — limited downside"))
 
     score = round(score, 1)
     direction = "LONG" if score >= 2.5 else "SHORT" if score <= -2.5 else "NEUTRAL"
