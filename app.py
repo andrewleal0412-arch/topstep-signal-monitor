@@ -2310,48 +2310,8 @@ def render_settings_tab():
     # ── Chart Timeframe ───────────────────────────────────────────────────────
     st.markdown("### Chart Timeframe")
     st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
-    st.caption("Controls the candle interval used on the MNQ, MES, and MGC chart tabs.")
+    st.caption("Controls the candle interval used on the MGC chart.")
     st.divider()
-
-    # ── Eval Tracker ──────────────────────────────────────────────────────────
-    st.markdown("### Eval Tracker")
-    acct = st.selectbox("Account Size", list(TOPSTEP_ACCOUNTS.keys()), key="acct")
-    rules = TOPSTEP_ACCOUNTS[acct]
-    # store for use by scale guide in main()
-    st.session_state["rules"] = rules
-
-    st.markdown("**Enter your P&L**")
-    col1, col2 = st.columns(2)
-    with col1:
-        daily_pnl = st.number_input("Today's P&L ($)", value=0.0, step=50.0, key="daily_pnl")
-    with col2:
-        total_pnl = st.number_input("Total P&L ($)", value=0.0, step=100.0, key="total_pnl")
-
-    daily_rem = rules["daily_loss"] + daily_pnl
-    dd_used   = max(0.0, -total_pnl)
-    pct = lambda v, mx: max(0.0, min(1.0, v / mx))
-
-    st.markdown("**Eval Progress**")
-    st.progress(pct(daily_rem, rules["daily_loss"]),
-                text=f"Daily loss room: ${daily_rem:,.0f} / ${rules['daily_loss']:,.0f}")
-    st.caption("How much you can still lose today")
-    st.progress(pct(max(0, total_pnl), rules["target"]),
-                text=f"Profit target: ${total_pnl:,.0f} / ${rules['target']:,.0f}")
-    st.caption("Reach this to pass the eval")
-    st.progress(pct(dd_used, rules["max_dd"]),
-                text=f"Max drawdown: ${dd_used:,.0f} / ${rules['max_dd']:,.0f}")
-    st.caption("If account drops this far, eval ends")
-
-    if daily_pnl <= -rules["daily_loss"]:
-        st.error("STOP — Daily loss limit hit!")
-    elif dd_used >= rules["max_dd"]:
-        st.error("ACCOUNT BUSTED — Max drawdown hit!")
-    elif total_pnl >= rules["target"]:
-        st.success("EVAL PASSED! Contact your platform.")
-    elif daily_rem < rules["daily_loss"] * 0.25:
-        st.warning("Low daily loss buffer — trade small")
-    else:
-        st.info(f"Active — max {rules['contract_limit']} contracts")
 
     # ── Phone Alerts ──────────────────────────────────────────────────────────
     st.divider()
