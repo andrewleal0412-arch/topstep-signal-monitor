@@ -151,7 +151,7 @@ def send_notification(symbol: str, trade: dict):
 
     ti       = TICK_INFO[symbol]
     d        = trade["direction"]
-    strength = min(int(abs(trade["score"]) / 10.0 * 100), 99)
+    strength = min(int(abs(trade["score"]) / 12.0 * 100), 99)
     sl_ticks = abs(trade["entry"] - trade["sl"]) / ti["tick"]
     tp1_ticks= abs(trade["entry"] - trade["tp1"]) / ti["tick"]
 
@@ -283,6 +283,92 @@ def get_htf_bias(df: pd.DataFrame) -> int:
     elif bias <= -2.0: return -1
     return 0
 
+# ─── Fair Value Gap Detection ─────────────────────────────────────────────────
+def detect_fvg(df: pd.DataFrame) -> dict:
+    """
+    Scan the last 50 candles for unfilled Fair Value Gaps (FVGs).
+
+    Bullish FVG: candle[i-2].High < candle[i].Low  — fast up-move left a gap; acts as support on retrace
+    Bearish FVG: candle[i-2].Low  > candle[i].High — fast down-move left a gap; acts as resistance on retrace
+
+    Returns:
+      bullish        — list of {"top", "bottom", "ts"} for unfilled bullish FVGs
+      bearish        — list of {"top", "bottom", "ts"} for unfilled bearish FVGs
+      in_bullish_fvg — True if current price is inside a bullish FVG (buy zone)
+      in_bearish_fvg — True if current price is inside a bearish FVG (sell zone)
+      nearest_bull   — closest bullish FVG or None
+      nearest_bear   — closest bearish FVG or None
+    """
+    result = {
+        "bullish": [], "bearish": [],
+        "in_bullish_fvg": False, "in_bearish_fvg": False,
+        "nearest_bull": None, "nearest_bear": None,
+    }
+    if len(df) < 5:
+        return result
+
+    current_price = float(df["Close"].iloc[-1])
+    lookback      = min(50, len(df) - 2)
+
+    bullish_fvgs: list = []
+    bearish_fvgs: list = []
+
+    for i in range(2, lookback + 2):
+        idx = len(df) - i
+        if idx < 2:
+            break
+
+        c1_high = float(df["High"].iloc[idx - 2])
+        c1_low  = float(df["Low"].iloc[idx - 2])
+        c3_low  = float(df["Low"].iloc[idx])
+        c3_high = float(df["High"].iloc[idx])
+        ts      = df.index[idx]
+
+        # ── Bullish FVG ────────────────────────────────────────────────────────
+        if c1_high < c3_low:
+            fvg_bottom, fvg_top = c1_high, c3_low
+            # Filled if any later candle overlaps the gap
+            filled = any(
+                float(df["Low"].iloc[j])  <= fvg_top and
+                float(df["High"].iloc[j]) >= fvg_bottom
+                for j in range(idx + 1, len(df))
+            )
+            if not filled:
+                bullish_fvgs.append({"top": fvg_top, "bottom": fvg_bottom, "ts": ts})
+
+        # ── Bearish FVG ────────────────────────────────────────────────────────
+        if c1_low > c3_high:
+            fvg_bottom, fvg_top = c3_high, c1_low
+            filled = any(
+                float(df["Low"].iloc[j])  <= fvg_top and
+                float(df["High"].iloc[j]) >= fvg_bottom
+                for j in range(idx + 1, len(df))
+            )
+            if not filled:
+                bearish_fvgs.append({"top": fvg_top, "bottom": fvg_bottom, "ts": ts})
+
+    result["bullish"] = bullish_fvgs
+    result["bearish"] = bearish_fvgs
+
+    for fvg in bullish_fvgs:
+        if fvg["bottom"] <= current_price <= fvg["top"]:
+            result["in_bullish_fvg"] = True
+            break
+
+    for fvg in bearish_fvgs:
+        if fvg["bottom"] <= current_price <= fvg["top"]:
+            result["in_bearish_fvg"] = True
+            break
+
+    if bullish_fvgs:
+        result["nearest_bull"] = min(bullish_fvgs,
+            key=lambda f: abs(current_price - (f["top"] + f["bottom"]) / 2))
+    if bearish_fvgs:
+        result["nearest_bear"] = min(bearish_fvgs,
+            key=lambda f: abs(current_price - (f["top"] + f["bottom"]) / 2))
+
+    return result
+
 # ─── Signal Engine ────────────────────────────────────────────────────────────
 def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int = 0, htf_bias_1h: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
@@ -341,11 +427,26 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
         if score < 0:   score -= 1.0  # aligned SHORT
         elif score > 0: score -= 1.5  # counter-trend LONG weakened
 
+    # ── Fair Value Gap scoring ────────────────────────────────────────────────
+    fvg = detect_fvg(df)
+    if fvg["in_bullish_fvg"]:
+        score += 1.5
+    elif fvg["in_bearish_fvg"]:
+        score -= 1.5
+    else:
+        nb = fvg["nearest_bull"]
+        nd = fvg["nearest_bear"]
+        price = float(df["Close"].iloc[-1])
+        if nb and nb["bottom"] < price:
+            score += 0.5
+        elif nd and nd["top"] > price:
+            score -= 0.5
+
     score  = round(score, 2)
 
     if   score >= 2.5: direction = "LONG"
     elif score <= -2.5: direction = "SHORT"
-    else: return {**empty, "score": score}
+    else: return {**empty, "score": score, "fvg": fvg}
 
     atr   = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
     price = float(last["Close"])
@@ -367,7 +468,7 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
         tp2   = _snap(price - sl_mult * 2 * atr, tick)
 
     return {"direction": direction, "score": score, "entry": entry,
-            "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr, "reasons": []}
+            "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr, "reasons": [], "fvg": fvg}
 
 # ─── Session Gate ─────────────────────────────────────────────────────────────
 def trading_session_active(symbol: str) -> bool:

@@ -60,7 +60,7 @@ def send_notification(symbol: str, signal: dict, ti: dict):
 
     d        = signal["direction"]
     name     = ti["name"]
-    strength = min(int(abs(score) / 10.0 * 100), 99)
+    strength = min(int(abs(score) / 12.0 * 100), 99)
     tick_sz  = ti["tick"]
     sl_ticks = abs(signal["entry"] - signal["sl"])  / tick_sz
     tp1_ticks= abs(signal["entry"] - signal["tp1"]) / tick_sz
@@ -1134,12 +1134,100 @@ def get_htf_bias(df: pd.DataFrame) -> int:
     elif bias <= -2.0: return -1
     return 0
 
+# ─── Fair Value Gap Detection ─────────────────────────────────────────────────
+def detect_fvg(df: pd.DataFrame) -> dict:
+    """
+    Scan the last 50 candles for unfilled Fair Value Gaps (FVGs).
+
+    Bullish FVG: candle[i-2].High < candle[i].Low  — fast up-move left a gap; acts as support on retrace
+    Bearish FVG: candle[i-2].Low  > candle[i].High — fast down-move left a gap; acts as resistance on retrace
+
+    Returns:
+      bullish        — list of {"top", "bottom", "ts"} for unfilled bullish FVGs
+      bearish        — list of {"top", "bottom", "ts"} for unfilled bearish FVGs
+      in_bullish_fvg — True if current price is inside a bullish FVG (buy zone)
+      in_bearish_fvg — True if current price is inside a bearish FVG (sell zone)
+      nearest_bull   — closest bullish FVG or None
+      nearest_bear   — closest bearish FVG or None
+    """
+    result = {
+        "bullish": [], "bearish": [],
+        "in_bullish_fvg": False, "in_bearish_fvg": False,
+        "nearest_bull": None, "nearest_bear": None,
+    }
+    if len(df) < 5:
+        return result
+
+    current_price = float(df["Close"].iloc[-1])
+    lookback      = min(50, len(df) - 2)
+
+    bullish_fvgs: list = []
+    bearish_fvgs: list = []
+
+    for i in range(2, lookback + 2):
+        idx = len(df) - i
+        if idx < 2:
+            break
+
+        c1_high = float(df["High"].iloc[idx - 2])
+        c1_low  = float(df["Low"].iloc[idx - 2])
+        c3_low  = float(df["Low"].iloc[idx])
+        c3_high = float(df["High"].iloc[idx])
+        ts      = df.index[idx]
+
+        # ── Bullish FVG ────────────────────────────────────────────────────────
+        if c1_high < c3_low:
+            fvg_bottom, fvg_top = c1_high, c3_low
+            # Filled if any later candle overlaps the gap
+            filled = any(
+                float(df["Low"].iloc[j])  <= fvg_top and
+                float(df["High"].iloc[j]) >= fvg_bottom
+                for j in range(idx + 1, len(df))
+            )
+            if not filled:
+                bullish_fvgs.append({"top": fvg_top, "bottom": fvg_bottom, "ts": ts})
+
+        # ── Bearish FVG ────────────────────────────────────────────────────────
+        if c1_low > c3_high:
+            fvg_bottom, fvg_top = c3_high, c1_low
+            filled = any(
+                float(df["Low"].iloc[j])  <= fvg_top and
+                float(df["High"].iloc[j]) >= fvg_bottom
+                for j in range(idx + 1, len(df))
+            )
+            if not filled:
+                bearish_fvgs.append({"top": fvg_top, "bottom": fvg_bottom, "ts": ts})
+
+    result["bullish"] = bullish_fvgs
+    result["bearish"] = bearish_fvgs
+
+    for fvg in bullish_fvgs:
+        if fvg["bottom"] <= current_price <= fvg["top"]:
+            result["in_bullish_fvg"] = True
+            break
+
+    for fvg in bearish_fvgs:
+        if fvg["bottom"] <= current_price <= fvg["top"]:
+            result["in_bearish_fvg"] = True
+            break
+
+    if bullish_fvgs:
+        result["nearest_bull"] = min(bullish_fvgs,
+            key=lambda f: abs(current_price - (f["top"] + f["bottom"]) / 2))
+    if bearish_fvgs:
+        result["nearest_bear"] = min(bearish_fvgs,
+            key=lambda f: abs(current_price - (f["top"] + f["bottom"]) / 2))
+
+    return result
+
 # ─── Signal Engine ────────────────────────────────────────────────────────────
 def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict = None, htf_bias_15m: int = 0, htf_bias_1h: int = 0) -> dict:
     empty = {"direction": "NEUTRAL", "score": 0, "reasons": [],
              "entry": None, "sl": None, "tp1": None, "tp2": None, "atr": 0,
              "price": 0, "rsi": 50, "ema9": 0, "ema21": 0, "ema50": 0, "vwap": 0,
-             "news_adjustment": 0.0}
+             "news_adjustment": 0.0, "fvg": {"bullish": [], "bearish": [],
+             "in_bullish_fvg": False, "in_bearish_fvg": False,
+             "nearest_bull": None, "nearest_bear": None}}
     if len(df) < 50:
         return empty
 
@@ -1239,6 +1327,27 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
             score -= 1.5
             reasons.append(("bull", "⚠ 15m trend is bearish — counter-trend LONG weakened"))
 
+    # ── Fair Value Gap scoring ────────────────────────────────────────────────
+    fvg = detect_fvg(df)
+    if fvg["in_bullish_fvg"]:
+        score += 1.5
+        reasons.append(("bull", "🟩 Price inside bullish FVG — institutional support zone"))
+    elif fvg["in_bearish_fvg"]:
+        score -= 1.5
+        reasons.append(("bear", "🟥 Price inside bearish FVG — institutional resistance zone"))
+    else:
+        nb = fvg["nearest_bull"]
+        nd = fvg["nearest_bear"]
+        price = float(df["Close"].iloc[-1])
+        if nb and nb["bottom"] < price:
+            # Unfilled bullish FVG below — acts as support
+            score += 0.5
+            reasons.append(("bull", f"🟩 Unfilled bullish FVG below at {nb['bottom']:,.2f}–{nb['top']:,.2f} — nearby support"))
+        elif nd and nd["top"] > price:
+            # Unfilled bearish FVG above — acts as resistance
+            score -= 0.5
+            reasons.append(("bear", f"🟥 Unfilled bearish FVG above at {nd['bottom']:,.2f}–{nd['top']:,.2f} — nearby resistance"))
+
     score = round(score, 1)
     direction = "LONG" if score >= 2.5 else "SHORT" if score <= -2.5 else "NEUTRAL"
 
@@ -1278,6 +1387,7 @@ def generate_signal(df: pd.DataFrame, symbol: str = None, news_sentiment: dict =
         "vwap":  float(last["VWAP"]),
         "news_adjustment": news_adj,
         "sl_mult": sl_mult,
+        "fvg": fvg,
     }
 
 # ─── Chart ────────────────────────────────────────────────────────────────────
@@ -1372,7 +1482,27 @@ def build_price_chart(df: pd.DataFrame, signal: dict, open_trade: dict = None) -
         _hline_annotation(fig, lvls["tp1"],   "#26a65b",   "dash",  1.5, "TP1  ")
         _hline_annotation(fig, lvls["tp2"],   "#34d399",   "dot",   1.2, "TP2  ")
 
-    fig.update_layout(**_chart_layout(560, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB", rangeslider=True))
+    # ── FVG zones (shaded horizontal bands) ──────────────────────────────────
+    fvg_data = signal.get("fvg", {})
+    x_start  = plot_df.index[0]
+    x_end    = plot_df.index[-1]
+    # Show up to 3 most recent unfilled FVGs per type
+    for fvg in list(fvg_data.get("bullish", []))[:3]:
+        fig.add_shape(type="rect",
+            x0=x_start, x1=x_end,
+            y0=fvg["bottom"], y1=fvg["top"],
+            fillcolor="rgba(52,211,153,0.07)",
+            line=dict(color="rgba(52,211,153,0.25)", width=1),
+            layer="below")
+    for fvg in list(fvg_data.get("bearish", []))[:3]:
+        fig.add_shape(type="rect",
+            x0=x_start, x1=x_end,
+            y0=fvg["bottom"], y1=fvg["top"],
+            fillcolor="rgba(255,55,95,0.07)",
+            line=dict(color="rgba(255,55,95,0.25)", width=1),
+            layer="below")
+
+    fig.update_layout(**_chart_layout(560, "Price  ·  EMA 9/21/50  ·  VWAP  ·  BB  ·  FVG", rangeslider=True))
     return fig
 
 def build_rsi_chart(df: pd.DataFrame) -> go.Figure:
@@ -1572,7 +1702,7 @@ def render_instrument(symbol: str, interval: str, period: str):
         d     = open_trade.get("direction", d)
     else:
         score = signal["score"]
-    strength = min(abs(score) / 10.0 * 100, 99)
+    strength = min(abs(score) / 12.0 * 100, 99)
 
     if d == "LONG":
         banner_cls, icon, dir_color, dir_html = "sig-banner-long",  "📈", "#30d158", tip("LONG","Long")
@@ -1598,7 +1728,7 @@ def render_instrument(symbol: str, interval: str, period: str):
   </div>
   <div class="sig-right">
     <div class="sig-score-num" style="color:{dir_color}">{score:+.1f}</div>
-    <div class="sig-score-lbl">score / 10.0</div>
+    <div class="sig-score-lbl">score / 12.0</div>
     <div class="sig-score-lbl" style="margin-top:4px">{strength:.0f}% strength</div>
   </div>
 </div>
@@ -2070,7 +2200,7 @@ def render_trade_log():
             # Signal strength at entry
             score = t.get("score", None)
             if score is not None:
-                strength = min(int(abs(score) / 10.0 * 100), 99)
+                strength = min(int(abs(score) / 12.0 * 100), 99)
                 if strength >= 70:
                     strength_color = "#30d158"
                 elif strength >= 45:
@@ -2274,7 +2404,7 @@ def render_settings_tab():
         help="Score 4–5 is the historical sweet spot (100% win rate). Scores above 7 may indicate overextended moves."
     )
     # Show what the selected score means in context
-    pct = min(int(min_score / 10.0 * 100), 99)
+    pct = min(int(min_score / 12.0 * 100), 99)
     if min_score < 3.0:
         score_label, score_color = "low threshold — many alerts, lower accuracy", "#fbbf24"
     elif min_score < 4.0:
@@ -2385,7 +2515,7 @@ def render_dashboard(interval: str, period: str):
                 icon    = "●"
                 label   = "WAITING"
 
-            strength = min(int(abs(score) / 10.0 * 100), 99)
+            strength = min(int(abs(score) / 12.0 * 100), 99)
             price_str = f"{price:,.2f}" if price else "—"
             sess_on, sess_reason, _ = trading_session_active(symbol)
             if symbol in _SESSION_GATE_EXEMPT:
