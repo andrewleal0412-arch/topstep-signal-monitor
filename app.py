@@ -721,15 +721,22 @@ def tip(label: str, key: str = None) -> str:
 
 # ─── Trading Session Gate ─────────────────────────────────────────────────────
 def trading_session_active(symbol: str) -> tuple:
-    """MGC trades 24h — always active except Saturday and early Sunday."""
+    """
+    MGC trades nearly 24h Sun-Fri, with two blackout windows:
+      - Daily maintenance: 2:00 PM – 3:00 PM PT (5-6 PM ET) every weekday
+      - Weekend: Saturday all day + Sunday before 3:00 PM PT
+    """
     now     = now_pt()
     weekday = now.weekday()
     h       = now.hour + now.minute / 60.0
-    # Closed Saturday all day and Sunday before 3pm PT (market reopens ~3pm PT Sunday)
     if weekday == 5:
         return False, "Market closed — Saturday", "3:00 PM PT Sunday"
     if weekday == 6 and h < 15.0:
         return False, "Market closed — Sunday pre-open", "3:00 PM PT"
+    if 14.0 <= h < 15.0:
+        return False, "Daily maintenance — market closed", "3:00 PM PT"
+    if 15.0 <= h < 15.083:
+        return False, "Market reopening — waiting for fresh data", "3:05 PM PT"
     return True, "Gold futures active 24h", ""
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -1671,8 +1678,8 @@ def render_instrument(symbol: str, interval: str, period: str):
      display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
   <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
        box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
-  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE 24H</span>
-  <span style="font-size:12px;color:#64748b">— Signals recorded around the clock</span>
+  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE</span>
+  <span style="font-size:12px;color:#64748b">— Bot is monitoring MGC for signals</span>
 </div>""", unsafe_allow_html=True)
     else:
         next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
@@ -2498,9 +2505,9 @@ def render_dashboard(interval: str, period: str):
             price_str = f"{price:,.2f}" if price else "—"
             sess_on, sess_reason, _ = trading_session_active(symbol)
             sess_badge = ('<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                          'color:#34d399">● ACTIVE 24H</div>' if sess_on else
+                          'color:#34d399">● ACTIVE</div>' if sess_on else
                           '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                          'color:#fbbf24">⏸ CLOSED</div>'
+                          'color:#fbbf24">⏸ PAUSED</div>'
                 )
 
             def _bias_pill(label: str, bias: int) -> str:
@@ -2673,7 +2680,7 @@ def main():
      letter-spacing:-0.02em;color:#f1f5f9;line-height:1;margin-bottom:4px">
   Paper<span style="color:#6366f1">Trail</span>
 </div>""", unsafe_allow_html=True)
-    st.caption(f"Live signals for MNQ, ES & Gold &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
+    st.caption(f"Live signals for MGC &nbsp;|&nbsp; {now_pt().strftime('%I:%M:%S %p %Z')}",
                unsafe_allow_html=True)
     st.markdown("""
 <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);

@@ -475,15 +475,27 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
 
 # ─── Session Gate ─────────────────────────────────────────────────────────────
 def trading_session_active(symbol: str) -> tuple:
-    """MGC trades 24h — always active except Saturday and early Sunday."""
+    """
+    MGC trades nearly 24h Sun-Fri, with two blackout windows:
+      - Daily maintenance: 2:00 PM – 3:00 PM PT (5-6 PM ET) every weekday
+      - Weekend: Saturday all day + Sunday before 3:00 PM PT
+    During blackouts the bot must NOT generate signals or check TP/SL,
+    because yfinance returns stale pre-close data that causes false closes.
+    """
     now     = now_pt()
     weekday = now.weekday()
     h       = now.hour + now.minute / 60.0
-    # Closed Saturday all day and Sunday before 3pm PT (market reopens ~3pm PT Sunday)
+    # Weekend
     if weekday == 5:
         return False, "Market closed — Saturday", "3:00 PM PT Sunday"
     if weekday == 6 and h < 15.0:
         return False, "Market closed — Sunday pre-open", "3:00 PM PT"
+    # Daily maintenance window: 2:00 PM – 3:00 PM PT (CME 5-6 PM ET)
+    if 14.0 <= h < 15.0:
+        return False, "Daily maintenance — market closed", "3:00 PM PT"
+    # Buffer after reopen: skip first 5 min so fresh candles populate
+    if 15.0 <= h < 15.083:  # 3:00 - 3:05 PM PT
+        return False, "Market reopening — waiting for fresh data", "3:05 PM PT"
     return True, "Gold futures active 24h", ""
 
 # ─── TP/SL Checker ────────────────────────────────────────────────────────────
@@ -698,6 +710,14 @@ def _has_open_trade(symbol: str) -> bool:
 
 def run_once():
     log.info("── tick ──")
+
+    # ── Session gate — pause during maintenance & weekends ───────────────
+    # Check once for all symbols (they share the same CME schedule)
+    active, reason, reopens = trading_session_active("MGC=F")
+    if not active:
+        log.info(f"PAUSED — {reason} (reopens {reopens})")
+        return
+
     articles = fetch_news()
     for symbol in ACTIVE_SYMBOLS:
         time.sleep(15)  # avoid yfinance rate limiting
