@@ -2213,11 +2213,24 @@ def render_settings_tab():
     )
     min_score = st.slider(
         "Only alert me when signal strength is at least",
-        min_value=2.5, max_value=6.0, step=0.5,
-        value=float(cfg.get("min_score", 3.0)),
+        min_value=2.0, max_value=10.0, step=0.5,
+        value=float(cfg.get("min_score", 4.0)),
         key="ntfy_min_score",
-        help="Higher = fewer but stronger alerts. Max possible score is 6.0."
+        help="Score 4–5 is the historical sweet spot (100% win rate). Scores above 7 may indicate overextended moves."
     )
+    # Show what the selected score means in context
+    pct = min(int(min_score / 10.0 * 100), 99)
+    if min_score < 3.0:
+        score_label, score_color = "low threshold — many alerts, lower accuracy", "#fbbf24"
+    elif min_score < 4.0:
+        score_label, score_color = "moderate — good for monitoring", "#fbbf24"
+    elif min_score <= 5.5:
+        score_label, score_color = "optimal — historical sweet spot ✅", "#30d158"
+    elif min_score <= 7.0:
+        score_label, score_color = "high — fewer alerts, watch for overextension", "#fbbf24"
+    else:
+        score_label, score_color = "very high — signals may be overextended ⚠️", "#ff375f"
+    st.markdown(f'<div style="font-size:12px;color:{score_color};margin-top:-8px">{pct}% strength cutoff · {score_label}</div>', unsafe_allow_html=True)
 
     new_cfg = {"ntfy_topic": topic_val, "notify_enabled": notify_on, "min_score": min_score}
     if new_cfg != cfg:
