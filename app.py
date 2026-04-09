@@ -123,12 +123,8 @@ INSTRUMENT_KEYWORDS = {
 
 # Symbol -> which keyword groups are relevant
 SYMBOL_GROUPS = {
-    "MNQ=F": ["nasdaq", "macro"],
-    "NQ=F":  ["nasdaq", "macro"],
-    "MES=F": ["sp500",  "macro"],
-    "ES=F":  ["sp500",  "macro"],
-    "GC=F":  ["gold",   "macro"],
     "MGC=F": ["gold",   "macro"],
+    "GC=F":  ["gold",   "macro"],
 }
 
 # Economic calendar — recurring high-impact events (weekday 0=Mon, day_of_month)
@@ -661,60 +657,16 @@ def tip(label: str, key: str = None) -> str:
 
 # ─── Trading Session Gate ─────────────────────────────────────────────────────
 def trading_session_active(symbol: str) -> tuple:
-    """Return (is_active: bool, reason: str, next_window: str)."""
+    """MGC trades 24h — always active except Saturday and early Sunday."""
     now     = now_pt()
-    weekday = now.weekday()          # 0=Mon … 6=Sun
-    h       = now.hour + now.minute / 60.0  # fractional hour in PT
-
-    # Saturday — fully closed
+    weekday = now.weekday()
+    h       = now.hour + now.minute / 60.0
+    # Closed Saturday all day and Sunday before 3pm PT (market reopens ~3pm PT Sunday)
     if weekday == 5:
-        return False, "Markets closed — Saturday", "Sunday 3:00 PM PT"
-
-    # Sunday before futures reopen (6 PM ET = 3 PM PT)
+        return False, "Market closed — Saturday", "3:00 PM PT Sunday"
     if weekday == 6 and h < 15.0:
-        return False, "Markets closed — reopens Sunday 3:00 PM PT", "3:00 PM PT today"
-
-    if symbol in ("MNQ=F", "MES=F"):
-        if 6.5 <= h < 8.5:
-            return True,  "Market open session (6:30–8:30 AM PT)", ""
-        if 11.0 <= h < 13.0:
-            return True,  "Power hour / close session (11:00 AM–1:00 PM PT)", ""
-        if 8.5 <= h < 11.0:
-            return False, "Midday chop — signals paused", "11:00 AM PT"
-        if 13.0 <= h:
-            return False, "After-hours — signals paused", "6:30 AM PT tomorrow"
-        # Overnight (h < 6.5)
-        return False, "Pre-market — signals paused", "6:30 AM PT"
-
-    if symbol == "MGC=F":
-        if h < 2.0:
-            return True,  "London session (12:00–2:00 AM PT)", ""
-        if 5.0 <= h < 9.0:
-            return True,  "COMEX / NY open session (5:00–9:00 AM PT)", ""
-        if 2.0 <= h < 5.0:
-            return False, "Between London & COMEX — signals paused", "5:00 AM PT"
-        # h >= 9.0
-        return False, "Outside gold sessions — signals paused", "12:00 AM PT"
-
-    return True, "", ""
-
-def trade_in_session(symbol: str, timestamp_str: str) -> bool:
-    """Return True if the trade timestamp falls within an active session for the symbol."""
-    try:
-        ts = datetime.fromisoformat(timestamp_str).astimezone(PT)
-    except Exception:
-        return False
-    weekday = ts.weekday()
-    h = ts.hour + ts.minute / 60.0
-    if weekday == 5:
-        return False
-    if weekday == 6 and h < 15.0:
-        return False
-    if symbol in ("MNQ=F", "MES=F"):
-        return (6.5 <= h < 8.5) or (11.0 <= h < 13.0)
-    if symbol == "MGC=F":
-        return (h < 2.0) or (5.0 <= h < 9.0)
-    return True
+        return False, "Market closed — Sunday pre-open", "3:00 PM PT"
+    return True, "Gold futures active 24h", ""
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 TOPSTEP_ACCOUNTS = {
@@ -729,14 +681,10 @@ TICK_INFO = {
     "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
 }
 
-# ── Active symbols — only these are monitored and traded ──────────────────────
-# To re-enable MNQ or MES, add them back to this set.
-# All config/tick data above is preserved so nothing is lost.
-ACTIVE_SYMBOLS = {
-    # "MNQ=F",   # Micro Nasdaq  — disabled: insufficient clean data, fast-moving
-    # "MES=F",   # Micro S&P 500 — disabled: re-enable after MGC data is solid
-    "MGC=F",     # Micro Gold    — primary focus, best win rate
-}
+# ── Active symbols ────────────────────────────────────────────────────────────
+# To add MNQ or MES back: add to this set, restore their TICK_INFO entries,
+# and add tabs back in main().
+ACTIVE_SYMBOLS = {"MGC=F"}
 
 # Fallback info for old/removed symbols still in the DB
 _SYMBOL_ALIAS = {
@@ -782,8 +730,6 @@ def save_single_trade(trade: dict):
 # market has moved more than this since the candle that generated the signal,
 # the entry price is no longer valid.
 _MAX_ENTRY_STALENESS_TICKS = {
-    "MNQ=F": 20,   # 20 × $0.25 = 5 pts  (MNQ moves fast)
-    "MES=F": 12,   # 12 × $0.25 = 3 pts
     "MGC=F": 15,   # 15 × $0.10 = 1.5 pts
 }
 
@@ -810,14 +756,8 @@ def _entry_is_fresh(signal: dict, symbol: str) -> bool:
 # Minimum score magnitude required to record a signal per symbol
 # Based on trade log analysis: low-score signals have poor win rates
 _MIN_RECORD_SCORE = {
-    "MNQ=F": 3.5,   # off-hours noise heavily impacted MNQ; higher bar needed
-    "MES=F": 2.5,   # 60% WR overall, insufficient data to raise yet
-    "MGC=F": 3.0,   # both MGC losses were score 2.60–2.71; 3.0+ = all wins
+    "MGC=F": 3.0,
 }
-
-# Symbols that trade 24h and should NOT be blocked by the session gate
-# Gold is a global market — off-hours MGC signals had 75% win rate vs 67% in-session
-_SESSION_GATE_EXEMPT = {"MGC=F", "MNQ=F", "MES=F"}
 
 def should_record_signal(signal: dict, symbol: str) -> bool:
     """Only record a new signal if:
@@ -1029,8 +969,6 @@ def get_adaptive_note(trades: list, symbol: str) -> str:
 # ─── Data ─────────────────────────────────────────────────────────────────────
 # Polygon.io real-time futures mapping
 _POLYGON_MAP = {
-    "MNQ=F": "MNQ",
-    "MES=F": "MES",
     "MGC=F": "MGC",
 }
 _POLYGON_INTERVAL = {
@@ -1666,8 +1604,7 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     # ── Session status banner ────────────────────────────────────────────────
     sess_active, sess_reason, sess_next = trading_session_active(symbol)
-    if symbol in _SESSION_GATE_EXEMPT:
-        # All symbols now 24h — always show as active
+    if sess_active:
         st.markdown("""
 <div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
      border-radius:10px;padding:9px 16px;margin-bottom:12px;
@@ -1676,16 +1613,6 @@ def render_instrument(symbol: str, interval: str, period: str):
        box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
   <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE 24H</span>
   <span style="font-size:12px;color:#64748b">— Signals recorded around the clock</span>
-</div>""", unsafe_allow_html=True)
-    elif sess_active:
-        st.markdown(f"""
-<div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
-     border-radius:10px;padding:9px 16px;margin-bottom:12px;
-     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
-  <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
-       box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
-  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE SESSION</span>
-  <span style="font-size:12px;color:#64748b">— {sess_reason}</span>
 </div>""", unsafe_allow_html=True)
     else:
         next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
@@ -1908,9 +1835,7 @@ def render_news_tab():
         if not rel: return 0.0
         return sum(a["compound"] for a in rel) / len(rel)
 
-    nasdaq_sent = overall_sent(["nasdaq", "macro"])
-    sp500_sent  = overall_sent(["sp500",  "macro"])
-    gold_sent   = overall_sent(["gold",   "macro"])
+    gold_sent = overall_sent(["gold", "macro"])
 
     def sent_html(score):
         if score >= 0.2:   return f'<span class="pos">▲ Positive news ({score:+.2f})</span>'
@@ -1918,22 +1843,10 @@ def render_news_tab():
         else:               return f'<span class="neu">● Mixed news ({score:+.2f})</span>'
 
     st.markdown(f"""
-<div class="panel-grid" style="grid-template-columns:repeat(3,1fr)">
-  <div class="mc" style="height:auto;padding:16px 18px">
-    <div class="mc-label">Nasdaq / Tech Sentiment</div>
-    <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(nasdaq_sent)}</div>
-    <div class="mc-delta neu">MNQ · NQ signals</div>
-  </div>
-  <div class="mc" style="height:auto;padding:16px 18px">
-    <div class="mc-label">S&P 500 Sentiment</div>
-    <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(sp500_sent)}</div>
-    <div class="mc-delta neu">MES · ES signals</div>
-  </div>
-  <div class="mc" style="height:auto;padding:16px 18px">
-    <div class="mc-label">Gold / Macro Sentiment</div>
-    <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(gold_sent)}</div>
-    <div class="mc-delta neu">GC · MGC signals</div>
-  </div>
+<div class="mc" style="height:auto;padding:16px 18px">
+  <div class="mc-label">Gold / Macro Sentiment</div>
+  <div class="mc-value" style="font-size:1.1em;margin:8px 0">{sent_html(gold_sent)}</div>
+  <div class="mc-delta neu">MGC — Micro Gold Futures</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -2481,8 +2394,6 @@ def render_dashboard(interval: str, period: str):
     st.markdown("### Market Overview")
 
     groups = [
-        {"label": "Nasdaq",  "symbols": ["MNQ=F"]},
-        {"label": "S&P 500", "symbols": ["MES=F"]},
         {"label": "Gold",    "symbols": ["MGC=F"]},
     ]
 
@@ -2527,16 +2438,10 @@ def render_dashboard(interval: str, period: str):
             strength = min(int(abs(score) / 12.0 * 100), 99)
             price_str = f"{price:,.2f}" if price else "—"
             sess_on, sess_reason, _ = trading_session_active(symbol)
-            if symbol in _SESSION_GATE_EXEMPT:
-                sess_badge = ('<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                              'color:#34d399">● ACTIVE 24H</div>')
-            else:
-                sess_badge = (
-                    '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                    'color:#34d399">● ACTIVE SESSION</div>'
-                    if sess_on else
-                    '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
-                    'color:#fbbf24">⏸ PAUSED</div>'
+            sess_badge = ('<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                          'color:#34d399">● ACTIVE 24H</div>' if sess_on else
+                          '<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'
+                          'color:#fbbf24">⏸ CLOSED</div>'
                 )
 
             def _bias_pill(label: str, bias: int) -> str:
@@ -2736,8 +2641,6 @@ def main():
         "News",
         "Trade Log",
         "Settings",
-        # "MNQ — Nasdaq",   # re-enable by adding to ACTIVE_SYMBOLS + tabs list
-        # "MES — S&P 500",  # re-enable by adding to ACTIVE_SYMBOLS + tabs list
     ])
 
     with tab_home:

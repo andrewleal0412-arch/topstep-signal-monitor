@@ -1,6 +1,6 @@
 """
 Signal Worker — runs 24/7 independent of the Streamlit app.
-Checks MNQ, MES, MGC every 5 minutes, closes open trades when TP/SL hit,
+Checks MGC (Micro Gold) every 5 minutes, closes open trades when TP/SL hit,
 records new signals, sends ntfy push notifications.
 """
 
@@ -36,28 +36,16 @@ TICK_INFO = {
     "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
 }
 
-# ── Active symbols — only these are scanned each cycle ───────────────────────
-# To re-enable MNQ or MES, uncomment the relevant line.
-ACTIVE_SYMBOLS = {
-    # "MNQ=F",   # Micro Nasdaq  — disabled: re-enable when ready
-    # "MES=F",   # Micro S&P 500 — disabled: re-enable when ready
-    "MGC=F",     # Micro Gold    — primary focus
-}
-
-# All symbols now trade 24h — session gate removed
-_SESSION_GATE_EXEMPT = {"MGC=F", "MNQ=F", "MES=F"}
+# ── Active symbols ────────────────────────────────────────────────────────────
+ACTIVE_SYMBOLS = {"MGC=F"}
 
 # Minimum score to record a signal per symbol (tuned from trade log)
 _MIN_SCORE = {
-    "MNQ=F": 3.5,
-    "MES=F": 2.5,
     "MGC=F": 3.0,
 }
 
 # Max ticks the signal entry can differ from the live 1m price before rejecting
 _MAX_ENTRY_STALENESS_TICKS = {
-    "MNQ=F": 20,   # 20 × $0.25 = 5 pts
-    "MES=F": 12,   # 12 × $0.25 = 3 pts
     "MGC=F": 15,   # 15 × $0.10 = 1.5 pts
 }
 
@@ -87,9 +75,7 @@ _MAX_PERIOD = {
 }
 
 SYMBOL_GROUPS = {
-    "MNQ=F": ["nasdaq", "macro"],
-    "MES=F": ["sp500",  "macro"],
-    "MGC=F": ["gold",   "macro"],
+    "MGC=F": ["gold", "macro"],
 }
 
 INSTRUMENT_KEYWORDS = {
@@ -479,17 +465,17 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
             "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr, "reasons": [], "fvg": fvg}
 
 # ─── Session Gate ─────────────────────────────────────────────────────────────
-def trading_session_active(symbol: str) -> bool:
+def trading_session_active(symbol: str) -> tuple:
+    """MGC trades 24h — always active except Saturday and early Sunday."""
     now     = now_pt()
     weekday = now.weekday()
     h       = now.hour + now.minute / 60.0
-    if weekday == 5: return False
-    if weekday == 6 and h < 15.0: return False
-    if symbol in ("MNQ=F", "MES=F"):
-        return (6.5 <= h < 8.5) or (11.0 <= h < 13.0)
-    if symbol == "MGC=F":
-        return True   # 24h market
-    return True
+    # Closed Saturday all day and Sunday before 3pm PT (market reopens ~3pm PT Sunday)
+    if weekday == 5:
+        return False, "Market closed — Saturday", "3:00 PM PT Sunday"
+    if weekday == 6 and h < 15.0:
+        return False, "Market closed — Sunday pre-open", "3:00 PM PT"
+    return True, "Gold futures active 24h", ""
 
 # ─── TP/SL Checker ────────────────────────────────────────────────────────────
 def check_open_trades(symbol: str, df: pd.DataFrame):
