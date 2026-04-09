@@ -572,13 +572,23 @@ def should_record(signal: dict, symbol: str) -> bool:
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
         elapsed = (now_pt() - last_time).total_seconds()
-        # Hard cooldown — never record within 5 min of last trade
-        if elapsed < 300:
+        # Hard cooldown — never record within 20 min of last trade
+        if elapsed < 1200:
             return False
-        # Same direction + same score fingerprint within 30 min = duplicate
-        if elapsed < 1800:
+        # Direction flip cooldown — wait 45 min before reversing
+        if elapsed < 2700 and last.get("direction") != signal["direction"]:
+            log.info(f"[cooldown] {symbol} direction flip blocked — only {elapsed/60:.0f}m since last trade")
+            return False
+        # Same direction + similar score within 60 min = duplicate
+        if elapsed < 3600:
             if (last.get("direction") == signal["direction"] and
-                abs(last.get("score", 0) - signal.get("score", 0)) < 0.5):
+                abs(last.get("score", 0) - signal.get("score", 0)) < 1.0):
+                return False
+        # Same entry price within 2 hours = stale repeat
+        if elapsed < 7200:
+            tick = TICK_INFO.get(symbol, {}).get("tick", 0.10)
+            if abs(float(last.get("entry", 0)) - float(signal.get("entry", 0))) / tick < 15:
+                log.info(f"[cooldown] {symbol} similar entry blocked — {elapsed/60:.0f}m, entry diff < 15 ticks")
                 return False
     except Exception:
         pass
