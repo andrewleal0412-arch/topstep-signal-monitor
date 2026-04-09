@@ -1637,11 +1637,12 @@ def render_instrument(symbol: str, interval: str, period: str):
 """, unsafe_allow_html=True)
 
     # ── Charts ────────────────────────────────────────────────────────────────
+    sym_key = symbol.replace("=", "_")   # unique key per instrument
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     st.plotly_chart(build_price_chart(df, signal, open_trade=open_trade),
-                    use_container_width=True, config=_CHART_CFG)
-    st.plotly_chart(build_rsi_chart(df),  use_container_width=True, config=_CHART_CFG)
-    st.plotly_chart(build_macd_chart(df), use_container_width=True, config=_CHART_CFG)
+                    use_container_width=True, config=_CHART_CFG, key=f"price_{sym_key}")
+    st.plotly_chart(build_rsi_chart(df),  use_container_width=True, config=_CHART_CFG, key=f"rsi_{sym_key}")
+    st.plotly_chart(build_macd_chart(df), use_container_width=True, config=_CHART_CFG, key=f"macd_{sym_key}")
 
 
     # ── Row 5: Trade History ──────────────────────────────────────────────────
