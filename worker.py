@@ -36,8 +36,8 @@ TICK_INFO = {
     "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
 }
 
-# MGC trades 24h — no session gate
-_SESSION_GATE_EXEMPT = {"MGC=F"}
+# All symbols now trade 24h — session gate removed
+_SESSION_GATE_EXEMPT = {"MGC=F", "MNQ=F", "MES=F"}
 
 # Minimum score to record a signal per symbol (tuned from trade log)
 _MIN_SCORE = {
@@ -432,10 +432,9 @@ def should_record(signal: dict, symbol: str) -> bool:
         return False
     if abs(signal.get("score", 0)) < _MIN_SCORE.get(symbol, 2.5):
         return False
-    if symbol not in _SESSION_GATE_EXEMPT and not trading_session_active(symbol):
-        return False
     trades     = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]
+    # Block if trade already open
     if any(t["status"] == "open" for t in sym_trades):
         return False
     if not sym_trades:
@@ -445,8 +444,15 @@ def should_record(signal: dict, symbol: str) -> bool:
         last_time = datetime.fromisoformat(last["timestamp"])
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
-        if (now_pt() - last_time).total_seconds() < 1800:  # 30 min cooldown
+        elapsed = (now_pt() - last_time).total_seconds()
+        # Hard cooldown — never record within 5 min of last trade
+        if elapsed < 300:
             return False
+        # Same direction + same score fingerprint within 30 min = duplicate
+        if elapsed < 1800:
+            if (last.get("direction") == signal["direction"] and
+                abs(last.get("score", 0) - signal.get("score", 0)) < 0.5):
+                return False
     except Exception:
         pass
     return True

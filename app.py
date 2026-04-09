@@ -778,28 +778,22 @@ _MIN_RECORD_SCORE = {
 
 # Symbols that trade 24h and should NOT be blocked by the session gate
 # Gold is a global market — off-hours MGC signals had 75% win rate vs 67% in-session
-_SESSION_GATE_EXEMPT = {"MGC=F"}
+_SESSION_GATE_EXEMPT = {"MGC=F", "MNQ=F", "MES=F"}
 
 def should_record_signal(signal: dict, symbol: str) -> bool:
     """Only record a new signal if:
     - Direction is not NEUTRAL
     - Score clears the per-symbol minimum threshold
-    - Currently in an active trading session for this symbol
     - No open trade already exists for this symbol (max 1 per symbol)
-    - Direction changed from last recorded trade
-    - At least 15 min since last trade on this symbol
+    - At least 5 min since last trade (hard cooldown)
+    - Not a duplicate fingerprint (same direction + similar score) within 30 min
     """
     if signal["direction"] == "NEUTRAL":
         return False
 
-    # Per-symbol score gate — filters out weak signals that historically lose
+    # Per-symbol score gate
     min_score = _MIN_RECORD_SCORE.get(symbol, 2.5)
     if abs(signal.get("score", 0)) < min_score:
-        return False
-
-    # Session gate — block off-hours signals for equity index futures (MNQ/MES)
-    # MGC is exempt: gold trades 24h and off-hours signals have shown 75% win rate
-    if symbol not in _SESSION_GATE_EXEMPT and not trading_session_active(symbol)[0]:
         return False
 
     trades = load_trades()
@@ -811,14 +805,21 @@ def should_record_signal(signal: dict, symbol: str) -> bool:
 
     if not sym_trades:
         return True
+
     last = sym_trades[-1]
-    # Cooldown: 30 min minimum between signals (prevents duplicate entries same setup)
     try:
         last_time = datetime.fromisoformat(last["timestamp"])
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
-        if (now_pt() - last_time).total_seconds() < 1800:
+        elapsed = (now_pt() - last_time).total_seconds()
+        # Hard cooldown — never record within 5 min of last trade
+        if elapsed < 300:
             return False
+        # Duplicate fingerprint — same direction + similar score within 30 min
+        if elapsed < 1800:
+            if (last.get("direction") == signal["direction"] and
+                abs(last.get("score", 0) - signal.get("score", 0)) < 0.5):
+                return False
     except Exception:
         pass
     return True
@@ -1493,7 +1494,7 @@ def render_instrument(symbol: str, interval: str, period: str):
     # ── Session status banner ────────────────────────────────────────────────
     sess_active, sess_reason, sess_next = trading_session_active(symbol)
     if symbol in _SESSION_GATE_EXEMPT:
-        # MGC trades 24h — always show as active, no paused state
+        # All symbols now 24h — always show as active
         st.markdown("""
 <div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
      border-radius:10px;padding:9px 16px;margin-bottom:12px;
@@ -1501,7 +1502,7 @@ def render_instrument(symbol: str, interval: str, period: str):
   <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
        box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
   <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE 24H</span>
-  <span style="font-size:12px;color:#64748b">— Gold trades around the clock</span>
+  <span style="font-size:12px;color:#64748b">— Signals recorded around the clock</span>
 </div>""", unsafe_allow_html=True)
     elif sess_active:
         st.markdown(f"""
