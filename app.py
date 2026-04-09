@@ -602,6 +602,57 @@ div[data-testid="stVerticalBlock"] > div { gap: 0rem; }
 /* ── Prevent page dimming on auto-refresh / cache rerun ── */
 [data-stale="true"] { opacity: 1 !important; }
 .stApp [data-stale="true"] * { opacity: 1 !important; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MOBILE RESPONSIVE  (≤ 640px)
+───────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+
+  /* Tighter page padding */
+  .block-container {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    padding-top: 1rem !important;
+  }
+
+  /* Metric grid: 2 columns instead of 5 */
+  .metrics-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .mc-value { font-size: 1.15em !important; }
+
+  /* Signal banner: stack vertically */
+  .sig-banner {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 16px !important;
+    gap: 10px !important;
+  }
+  .sig-right { text-align: left !important; width: 100% !important; }
+  .sig-dir   { font-size: 1.4em !important; }
+  .sig-score-num { font-size: 1.5em !important; }
+  .strength-bar-wrap { max-width: 100% !important; }
+
+  /* Two-panel: stack to single column */
+  .panel-grid { grid-template-columns: 1fr !important; }
+
+  /* Reason items: smaller font */
+  .reason-item { font-size: 13px !important; padding: 8px 10px !important; }
+
+  /* Tabs: smaller text, tighter padding */
+  .stTabs [data-baseweb="tab"] {
+    font-size: 12px !important;
+    padding: 8px 10px !important;
+  }
+
+  /* Trade log table: allow horizontal scroll */
+  .th-table { font-size: 11px !important; }
+  .th-table th, .th-table td { padding: 8px 8px !important; }
+
+  /* Score / headline numbers */
+  .sig-icon { font-size: 1.6em !important; }
+
+  /* Disclaimer */
+  div[style*="font-size:12px"] { font-size: 11px !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
