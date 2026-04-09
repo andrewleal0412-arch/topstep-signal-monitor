@@ -2398,10 +2398,10 @@ def render_settings_tab():
     )
     min_score = st.slider(
         "Only alert me when signal strength is at least",
-        min_value=2.0, max_value=10.0, step=0.5,
+        min_value=2.0, max_value=12.0, step=0.5,
         value=float(cfg.get("min_score", 4.0)),
         key="ntfy_min_score",
-        help="Score 4–5 is the historical sweet spot (100% win rate). Scores above 7 may indicate overextended moves."
+        help="Score 4–5 is the historical sweet spot (100% win rate). Max possible score is now 12.0 with FVG + HTF layers."
     )
     # Show what the selected score means in context
     pct = min(int(min_score / 12.0 * 100), 99)
