@@ -301,7 +301,7 @@ def detect_fvg(df: pd.DataFrame) -> dict:
     if len(df) < 5:
         return result
 
-    current_price = float(df["Close"].iloc[-1])
+    current_price = float(df["Close"].iloc[-2])  # use last closed candle
     lookback      = min(50, len(df) - 2)
 
     bullish_fvgs: list = []
@@ -370,7 +370,7 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     if len(df) < 50:
         return empty
 
-    last, prev = df.iloc[-1], df.iloc[-2]
+    last, prev = df.iloc[-2], df.iloc[-3]  # use last CLOSED candle, not the live open one
     score = 0.0
 
     # EMA stack
@@ -430,7 +430,7 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     else:
         nb = fvg["nearest_bull"]
         nd = fvg["nearest_bear"]
-        price = float(df["Close"].iloc[-1])
+        price = float(last["Close"])
         if nb and nb["bottom"] < price:
             score += 0.5
         elif nd and nd["top"] > price:
@@ -510,6 +510,8 @@ def check_open_trades(symbol: str, df: pd.DataFrame):
                 after   = df[df.index > sig_utc]
         except Exception:
             continue
+
+        after = after.iloc[:-1]  # drop last incomplete candle — its wick isn't final
 
         if after.empty:
             continue
