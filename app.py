@@ -1525,9 +1525,19 @@ def render_instrument(symbol: str, interval: str, period: str):
   <span style="font-size:12px;color:#64748b">— {sess_reason}{next_str}</span>
 </div>""", unsafe_allow_html=True)
 
+    # ── Resolve open trade early so banner + levels both pin to logged values ──
+    all_trades = load_trades()
+    open_trade = next((t for t in all_trades if t["symbol"] == symbol and t["status"] == "open"), None)
+
     # ── Signal banner (full-width) ────────────────────────────────────────────
-    d        = signal["direction"]
-    score    = signal["score"]
+    d     = signal["direction"]
+    # Pin score to the logged trade score when a trade is open so the banner
+    # matches the trade log — live recalc drifts as market conditions change.
+    if open_trade:
+        score = float(open_trade.get("score", signal["score"]))
+        d     = open_trade.get("direction", d)
+    else:
+        score = signal["score"]
     strength = abs(score) / 6.0 * 100
 
     if d == "LONG":
@@ -1569,8 +1579,7 @@ def render_instrument(symbol: str, interval: str, period: str):
         reasons_html = '<div class="reason-item">Not enough candle data yet</div>'
 
     # ── Use open trade levels if one exists (keeps tab consistent with log) ──
-    all_trades   = load_trades()
-    open_trade   = next((t for t in all_trades if t["symbol"] == symbol and t["status"] == "open"), None)
+    # (all_trades / open_trade already resolved above before the banner)
     display_lvls = None
     if open_trade:
         display_lvls = {
