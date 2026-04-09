@@ -36,6 +36,14 @@ TICK_INFO = {
     "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
 }
 
+# ── Active symbols — only these are scanned each cycle ───────────────────────
+# To re-enable MNQ or MES, uncomment the relevant line.
+ACTIVE_SYMBOLS = {
+    # "MNQ=F",   # Micro Nasdaq  — disabled: re-enable when ready
+    # "MES=F",   # Micro S&P 500 — disabled: re-enable when ready
+    "MGC=F",     # Micro Gold    — primary focus
+}
+
 # All symbols now trade 24h — session gate removed
 _SESSION_GATE_EXEMPT = {"MGC=F", "MNQ=F", "MES=F"}
 
@@ -614,7 +622,7 @@ def record_signal(signal: dict, symbol: str):
 def run_once():
     log.info("── tick ──")
     articles = fetch_news()
-    for symbol in TICK_INFO:
+    for symbol in ACTIVE_SYMBOLS:
         time.sleep(15)  # avoid yfinance rate limiting
         try:
             df = fetch_data(symbol, "5m", "60d")

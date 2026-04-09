@@ -729,6 +729,15 @@ TICK_INFO = {
     "MGC=F": {"tick": 0.10, "value": 1.00,  "name": "MGC"},
 }
 
+# ── Active symbols — only these are monitored and traded ──────────────────────
+# To re-enable MNQ or MES, add them back to this set.
+# All config/tick data above is preserved so nothing is lost.
+ACTIVE_SYMBOLS = {
+    # "MNQ=F",   # Micro Nasdaq  — disabled: insufficient clean data, fast-moving
+    # "MES=F",   # Micro S&P 500 — disabled: re-enable after MGC data is solid
+    "MGC=F",     # Micro Gold    — primary focus, best win rate
+}
+
 # Fallback info for old/removed symbols still in the DB
 _SYMBOL_ALIAS = {
     "NQ=F":  {"tick": 0.25, "value": 5.00,  "name": "NQ"},
@@ -2058,7 +2067,7 @@ def render_trade_log():
     # ── Overall stats across all instruments ─────────────────────────────────
     stats_all = get_stats(all_trades)
     by_sym = {}
-    for sym in TICK_INFO:
+    for sym in ACTIVE_SYMBOLS:
         s = get_stats(all_trades, sym)
         if s["total"] > 0 or s["open"] > 0:
             by_sym[sym] = s
@@ -2721,28 +2730,20 @@ def main():
 
     st.divider()
 
-    tab_home, tab_mnq, tab_mes, tab_mgc, tab_news, tab_log, tab_settings = st.tabs([
+    tab_home, tab_mgc, tab_news, tab_log, tab_settings = st.tabs([
         "Dashboard",
-        "MNQ — Nasdaq",
-        "MES — S&P 500",
         "MGC — Gold",
         "News",
         "Trade Log",
         "Settings",
+        # "MNQ — Nasdaq",   # re-enable by adding to ACTIVE_SYMBOLS + tabs list
+        # "MES — S&P 500",  # re-enable by adding to ACTIVE_SYMBOLS + tabs list
     ])
 
     with tab_home:
         render_dashboard(interval, period)
         st.divider()
         render_scale_guide(st.session_state.get("rules", TOPSTEP_ACCOUNTS["$50K"]))
-
-    with tab_mnq:
-        st.divider()
-        render_instrument("MNQ=F", interval, period)
-
-    with tab_mes:
-        st.divider()
-        render_instrument("MES=F", interval, period)
 
     with tab_mgc:
         st.divider()
