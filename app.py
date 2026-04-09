@@ -2311,7 +2311,6 @@ def render_settings_tab():
     st.markdown("### Chart Timeframe")
     st.selectbox("Timeframe", ["1m","2m","5m","15m","30m","1h"], index=2, key="tf")
     st.caption("Controls the candle interval used on the MGC chart.")
-    st.divider()
 
     # ── Phone Alerts ──────────────────────────────────────────────────────────
     st.divider()
