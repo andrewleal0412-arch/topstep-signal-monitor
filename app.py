@@ -297,29 +297,40 @@ html, body, [class*="css"], .stApp {
 .stApp { background: #080c14 !important; }
 section.main > div { background: #080c14 !important; }
 
-/* ── Streamlit tab overrides ── */
+/* ── Streamlit tab overrides — pill/button style ── */
 .stTabs [data-baseweb="tab-list"] {
     background: transparent !important;
-    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
-    gap: 4px;
+    border-bottom: none !important;
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+    padding-bottom: 4px !important;
 }
 .stTabs [data-baseweb="tab"] {
-    background: transparent !important;
+    background: rgba(255,255,255,0.03) !important;
     color: #64748b !important;
     font-family: 'Inter', sans-serif !important;
-    font-size: 15px !important;
-    font-weight: 500 !important;
-    padding: 10px 18px !important;
-    border-radius: 8px 8px 0 0 !important;
-    border: none !important;
-    letter-spacing: 0.01em;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    padding: 8px 16px !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    letter-spacing: 0.02em !important;
+    transition: all 0.15s ease !important;
+    border-left: 2px solid transparent !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    background: rgba(255,255,255,0.06) !important;
+    color: #94a3b8 !important;
 }
 .stTabs [aria-selected="true"] {
     background: rgba(99,102,241,0.1) !important;
     color: #818cf8 !important;
-    border-bottom: 2px solid #818cf8 !important;
+    border: 1px solid rgba(99,102,241,0.2) !important;
+    border-left: 2px solid #818cf8 !important;
 }
 .stTabs [data-baseweb="tab-panel"] { padding-top: 20px !important; }
+/* Remove default underline indicator */
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
 
 /* ── Selectbox / inputs ── */
 .stSelectbox > div > div {
@@ -637,10 +648,10 @@ div[data-testid="stVerticalBlock"] > div { gap: 0rem; }
   /* Reason items: smaller font */
   .reason-item { font-size: 13px !important; padding: 8px 10px !important; }
 
-  /* Tabs: smaller text, tighter padding */
+  /* Tabs: smaller text, tighter padding on mobile */
   .stTabs [data-baseweb="tab"] {
-    font-size: 12px !important;
-    padding: 8px 10px !important;
+    font-size: 11px !important;
+    padding: 6px 10px !important;
   }
 
   /* Trade log table: allow horizontal scroll */
