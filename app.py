@@ -38,7 +38,7 @@ def load_config() -> dict:
             return res.data[0]["data"]
     except Exception:
         pass
-    return {"ntfy_topic": "topstepdraco42", "notify_enabled": False, "min_score": 3.5}
+    return {"ntfy_topic": "topstepnotis", "notify_enabled": False, "min_score": 3.5}
 
 def save_config(cfg: dict):
     try:
@@ -2180,14 +2180,34 @@ def render_settings_tab():
     # ── Phone Alerts ──────────────────────────────────────────────────────────
     st.divider()
     st.markdown("### Phone Alerts")
-    st.caption("Get a notification on your phone when a strong signal fires.")
+    st.caption("Get a notification on your phone the moment a signal fires.")
+
+    st.markdown("""
+<div style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);
+     border-radius:10px;padding:14px 18px;margin-bottom:16px;
+     font-family:'Inter',sans-serif;font-size:14px;color:#94a3b8;line-height:1.8">
+  <div style="font-size:13px;font-weight:700;color:#818cf8;margin-bottom:8px">📱 How to set up alerts (2 min, free)</div>
+  <b style="color:#e2e8f0">Step 1</b> — Download the <b style="color:#e2e8f0">ntfy</b> app on your phone<br>
+  &nbsp;&nbsp;&nbsp;• iPhone: search <b>ntfy</b> in the App Store<br>
+  &nbsp;&nbsp;&nbsp;• Android: search <b>ntfy</b> in the Play Store<br><br>
+  <b style="color:#e2e8f0">Step 2</b> — Open the app, tap <b style="color:#e2e8f0">+</b> and subscribe to:<br>
+  &nbsp;&nbsp;&nbsp;<span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);
+  border-radius:6px;padding:2px 10px;font-family:monospace;color:#818cf8;font-size:14px">topstepnotis</span><br><br>
+  <b style="color:#e2e8f0">Step 3</b> — Toggle alerts on below and tap <b style="color:#e2e8f0">Send test alert</b> to confirm it works.<br><br>
+  <span style="font-size:12px;color:#64748b">No account needed. 100% free. Alerts arrive in under a second.</span>
+</div>
+""", unsafe_allow_html=True)
+
+    # Topic is locked — always topstepnotis, not user-editable
+    topic_val = "topstepnotis"
 
     notify_on = st.toggle("Send alerts to my phone", value=cfg.get("notify_enabled", False), key="notify_toggle")
-    topic_val = st.text_input(
-        "Your alert topic name",
-        value=cfg.get("ntfy_topic", "topstepdraco42"),
-        key="ntfy_topic_input",
-        help="This is the topic name you subscribed to in the ntfy app."
+    st.markdown(
+        '<div style="font-size:13px;color:#64748b;margin-top:-6px;margin-bottom:10px">'
+        'Alert topic: <span style="font-family:monospace;color:#818cf8;'
+        'background:rgba(99,102,241,0.1);border-radius:4px;padding:1px 8px">topstepnotis</span>'
+        '</div>',
+        unsafe_allow_html=True
     )
     min_score = st.slider(
         "Only alert me when signal strength is at least",
@@ -2216,16 +2236,6 @@ def render_settings_tab():
                 st.error(f"Failed: {e}")
     elif notify_on and not topic_val:
         st.warning("Enter a topic name to activate.")
-    else:
-        st.markdown("""
-**Quick setup (2 minutes):**
-
-1. Download the **ntfy** app — free, no account needed
-   - iPhone: search "ntfy" in the App Store
-   - Android: search "ntfy" in the Play Store
-2. Open the app, tap **+**, subscribe to topic: `topstepdraco42`
-3. Toggle on alerts above, then tap **Send test alert now**
-""")
 
 
 # ─── Dashboard Tab ────────────────────────────────────────────────────────────

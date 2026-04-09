@@ -20,7 +20,7 @@ _vader = SentimentIntensityAnalyzer()
 
 SUPABASE_URL       = os.environ["SUPABASE_URL"]
 SUPABASE_KEY       = os.environ["SUPABASE_KEY"]
-NTFY_TOPIC         = os.environ.get("NTFY_TOPIC", "")
+NTFY_TOPIC         = "topstepnotis"
 CHECK_INTERVAL_SEC = int(os.environ.get("CHECK_INTERVAL_SEC", "300"))  # 5 min
 
 logging.basicConfig(
@@ -108,7 +108,7 @@ def load_config() -> dict:
             return res.data[0]["data"]
     except Exception as e:
         log.error(f"load_config: {e}")
-    return {"ntfy_topic": NTFY_TOPIC, "notify_enabled": True, "min_score": 3.5}
+    return {"ntfy_topic": "topstepnotis", "notify_enabled": True, "min_score": 3.5}
 
 # ─── Notifications ────────────────────────────────────────────────────────────
 def send_notification(symbol: str, trade: dict):
