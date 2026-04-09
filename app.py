@@ -1602,22 +1602,22 @@ def render_instrument(symbol: str, interval: str, period: str):
     <td class="tl-meta">—</td>
   </tr>
   <tr>
-    <td class="tl-label" style="color:#ff375f">{tip('Stop','SL')}</td>
+    <td class="tl-label" style="color:#ff375f">Stop</td>
     <td class="tl-price mono" style="color:#ff375f">{display_lvls['sl']:,.2f}</td>
-    <td class="tl-meta" style="color:#ff375f">{sl_ticks:.0f} {tip('ticks','Tick')} &nbsp;· &nbsp;${sl_ticks*tick_val:,.0f}</td>
+    <td class="tl-meta" style="color:#ff375f">{sl_ticks:.0f} ticks &nbsp;· &nbsp;${sl_ticks*tick_val:,.0f}</td>
   </tr>
   <tr>
-    <td class="tl-label" style="color:#30d158">{tip('TP1','TP1')}</td>
+    <td class="tl-label" style="color:#30d158">TP1</td>
     <td class="tl-price mono" style="color:#30d158">{display_lvls['tp1']:,.2f}</td>
     <td class="tl-meta" style="color:#30d158">{tp1_ticks:.0f} ticks &nbsp;· &nbsp;${tp1_ticks*tick_val:,.0f}</td>
   </tr>
   <tr>
-    <td class="tl-label" style="color:#34c759">{tip('TP2','TP2')}</td>
+    <td class="tl-label" style="color:#34c759">TP2</td>
     <td class="tl-price mono" style="color:#34c759">{display_lvls['tp2']:,.2f}</td>
     <td class="tl-meta" style="color:#34c759">{tp2_ticks:.0f} ticks &nbsp;· &nbsp;${tp2_ticks*tick_val:,.0f}</td>
   </tr>
   <tr>
-    <td class="tl-label" style="color:#8e8e93">{tip('R:R','R:R')}</td>
+    <td class="tl-label" style="color:#8e8e93">R:R</td>
     <td colspan="2" class="tl-price" style="color:#8e8e93">1:1 to TP1 &nbsp;/&nbsp; 1:2 to TP2</td>
   </tr>
 </table>"""
