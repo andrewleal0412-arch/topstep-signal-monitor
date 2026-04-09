@@ -60,7 +60,7 @@ def send_notification(symbol: str, signal: dict, ti: dict):
 
     d        = signal["direction"]
     name     = ti["name"]
-    strength = int(abs(score) / 6.0 * 100)
+    strength = min(int(abs(score) / 10.0 * 100), 99)
     tick_sz  = ti["tick"]
     sl_ticks = abs(signal["entry"] - signal["sl"])  / tick_sz
     tp1_ticks= abs(signal["entry"] - signal["tp1"]) / tick_sz
@@ -1538,7 +1538,7 @@ def render_instrument(symbol: str, interval: str, period: str):
         d     = open_trade.get("direction", d)
     else:
         score = signal["score"]
-    strength = abs(score) / 6.0 * 100
+    strength = min(abs(score) / 10.0 * 100, 99)
 
     if d == "LONG":
         banner_cls, icon, dir_color, dir_html = "sig-banner-long",  "📈", "#30d158", tip("LONG","Long")
@@ -1564,7 +1564,7 @@ def render_instrument(symbol: str, interval: str, period: str):
   </div>
   <div class="sig-right">
     <div class="sig-score-num" style="color:{dir_color}">{score:+.1f}</div>
-    <div class="sig-score-lbl">score / 6.0</div>
+    <div class="sig-score-lbl">score / 10.0</div>
     <div class="sig-score-lbl" style="margin-top:4px">{strength:.0f}% strength</div>
   </div>
 </div>
@@ -2025,7 +2025,7 @@ def render_trade_log():
             # Signal strength at entry
             score = t.get("score", None)
             if score is not None:
-                strength = min(int(abs(score) / 6.0 * 100), 100)
+                strength = min(int(abs(score) / 10.0 * 100), 99)
                 if strength >= 70:
                     strength_color = "#30d158"
                 elif strength >= 45:
@@ -2317,7 +2317,7 @@ def render_dashboard(interval: str, period: str):
                 icon    = "●"
                 label   = "WAITING"
 
-            strength = int(abs(score) / 6.0 * 100)
+            strength = min(int(abs(score) / 10.0 * 100), 99)
             price_str = f"{price:,.2f}" if price else "—"
             sess_on, sess_reason, _ = trading_session_active(symbol)
             if symbol in _SESSION_GATE_EXEMPT:
