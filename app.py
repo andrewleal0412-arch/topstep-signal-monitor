@@ -1593,34 +1593,26 @@ def render_instrument(symbol: str, interval: str, period: str):
         sl_ticks  = abs(display_lvls["entry"] - display_lvls["sl"])  / tick_sz
         tp1_ticks = abs(display_lvls["entry"] - display_lvls["tp1"]) / tick_sz
         tp2_ticks = abs(display_lvls["entry"] - display_lvls["tp2"]) / tick_sz
-        locked_note = (' <span style="font-size:10px;color:#fbbf24;font-weight:600">● LIVE TRADE</span>' if open_trade else "")
-        levels_html = f"""
-<table class="tl-table">
-  <tr>
-    <td class="tl-label">Entry{locked_note}</td>
-    <td class="tl-price mono">{display_lvls['entry']:,.2f}</td>
-    <td class="tl-meta">—</td>
-  </tr>
-  <tr>
-    <td class="tl-label" style="color:#ff375f">Stop</td>
-    <td class="tl-price mono" style="color:#ff375f">{display_lvls['sl']:,.2f}</td>
-    <td class="tl-meta" style="color:#ff375f">{sl_ticks:.0f} ticks &nbsp;· &nbsp;${sl_ticks*tick_val:,.0f}</td>
-  </tr>
-  <tr>
-    <td class="tl-label" style="color:#30d158">TP1</td>
-    <td class="tl-price mono" style="color:#30d158">{display_lvls['tp1']:,.2f}</td>
-    <td class="tl-meta" style="color:#30d158">{tp1_ticks:.0f} ticks &nbsp;· &nbsp;${tp1_ticks*tick_val:,.0f}</td>
-  </tr>
-  <tr>
-    <td class="tl-label" style="color:#34c759">TP2</td>
-    <td class="tl-price mono" style="color:#34c759">{display_lvls['tp2']:,.2f}</td>
-    <td class="tl-meta" style="color:#34c759">{tp2_ticks:.0f} ticks &nbsp;· &nbsp;${tp2_ticks*tick_val:,.0f}</td>
-  </tr>
-  <tr>
-    <td class="tl-label" style="color:#8e8e93">R:R</td>
-    <td colspan="2" class="tl-price" style="color:#8e8e93">1:1 to TP1 &nbsp;/&nbsp; 1:2 to TP2</td>
-  </tr>
-</table>"""
+        live_badge = (' <span style="font-size:10px;color:#fbbf24;font-weight:700;margin-left:6px">● LIVE</span>' if open_trade else "")
+
+        def lvl_row(label, color, price, meta):
+            return f"""
+<div style="display:flex;align-items:center;justify-content:space-between;
+     padding:9px 12px;margin:4px 0;background:rgba(255,255,255,0.03);
+     border-radius:8px;border-left:2px solid {color}">
+  <span style="font-size:13px;font-weight:700;color:{color};min-width:52px">{label}</span>
+  <span style="font-family:monospace;font-size:15px;font-weight:700;color:#f1f5f9">{price}</span>
+  <span style="font-size:12px;color:#64748b;text-align:right">{meta}</span>
+</div>"""
+
+        levels_html = (
+            f'<div style="margin-bottom:4px;font-size:11px;color:#64748b">Entry{live_badge} &nbsp;·&nbsp; '
+            f'<span style="font-family:monospace;color:#f1f5f9;font-weight:700">{display_lvls["entry"]:,.2f}</span></div>'
+            + lvl_row("STOP",  "#ff375f", f'{display_lvls["sl"]:,.2f}',  f'{sl_ticks:.0f} ticks · ${sl_ticks*tick_val:,.0f}')
+            + lvl_row("TP1",   "#30d158", f'{display_lvls["tp1"]:,.2f}', f'{tp1_ticks:.0f} ticks · ${tp1_ticks*tick_val:,.0f}')
+            + lvl_row("TP2",   "#34d399", f'{display_lvls["tp2"]:,.2f}', f'{tp2_ticks:.0f} ticks · ${tp2_ticks*tick_val:,.0f}')
+            + lvl_row("R:R",   "#64748b", "1:1 / 1:2", "TP1 / TP2")
+        )
         levels_panel = f'<div class="panel-card"><div class="panel-title">Trade Levels</div>{levels_html}</div>'
     else:
         levels_panel = f'<div class="panel-card"><div class="panel-title">Trade Levels</div><div style="color:#8e8e93;font-size:13px;padding-top:8px">No active signal — levels appear when direction confirms.</div></div>'
