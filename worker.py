@@ -128,7 +128,7 @@ def send_notification(symbol: str, trade: dict):
     sl_ticks = abs(trade["entry"] - trade["sl"]) / ti["tick"]
     tp1_ticks= abs(trade["entry"] - trade["tp1"]) / ti["tick"]
 
-    title = f"{d} — {ti['name']} | Score {trade['score']:+.1f} ({strength}% strength)"
+    title = f"{d} - {ti['name']} | Score {trade['score']:+.1f} ({strength}% strength)"
     body  = (f"Entry: {trade['entry']:,.2f}\n"
              f"Stop:  {trade['sl']:,.2f}  ({sl_ticks:.0f} ticks)\n"
              f"TP1:   {trade['tp1']:,.2f}  ({tp1_ticks:.0f} ticks)\n"
