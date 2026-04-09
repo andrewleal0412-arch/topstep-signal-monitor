@@ -46,6 +46,33 @@ _MIN_SCORE = {
     "MGC=F": 3.0,
 }
 
+# Max ticks the signal entry can differ from the live 1m price before rejecting
+_MAX_ENTRY_STALENESS_TICKS = {
+    "MNQ=F": 20,   # 20 × $0.25 = 5 pts
+    "MES=F": 12,   # 12 × $0.25 = 3 pts
+    "MGC=F": 15,   # 15 × $0.10 = 1.5 pts
+}
+
+def _entry_is_fresh(signal: dict, symbol: str) -> bool:
+    """Reject signal if live 1m price has drifted too far from the entry."""
+    entry = signal.get("entry")
+    if entry is None:
+        return True
+    try:
+        df1m = fetch_data(symbol, "1m", "7d")
+        if df1m.empty:
+            return True
+        live_price = float(df1m["Close"].iloc[-1])
+        tick_sz    = TICK_INFO[symbol]["tick"]
+        max_ticks  = _MAX_ENTRY_STALENESS_TICKS.get(symbol, 20)
+        diff_ticks = abs(entry - live_price) / tick_sz
+        if diff_ticks > max_ticks:
+            log.warning(f"[staleness] {symbol} entry {entry} vs live {live_price:.2f} = {diff_ticks:.0f} ticks — REJECTED")
+            return False
+    except Exception as e:
+        log.warning(f"[staleness] check failed for {symbol}: {e}")
+    return True
+
 _MAX_PERIOD = {
     "1m": "7d", "2m": "60d", "5m": "60d",
     "15m": "60d", "30m": "60d", "1h": "730d",
@@ -431,6 +458,9 @@ def should_record(signal: dict, symbol: str) -> bool:
     if signal["direction"] == "NEUTRAL":
         return False
     if abs(signal.get("score", 0)) < _MIN_SCORE.get(symbol, 2.5):
+        return False
+    # Staleness gate — reject if live price has moved too far from entry
+    if not _entry_is_fresh(signal, symbol):
         return False
     trades     = load_trades()
     sym_trades = [t for t in trades if t["symbol"] == symbol]

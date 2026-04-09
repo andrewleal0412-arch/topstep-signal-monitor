@@ -768,6 +768,36 @@ def save_single_trade(trade: dict):
     except Exception:
         pass
 
+# Max ticks the signal entry can be away from the live 1m price before we
+# reject it as stale. yfinance 5m data can lag by several minutes; if the
+# market has moved more than this since the candle that generated the signal,
+# the entry price is no longer valid.
+_MAX_ENTRY_STALENESS_TICKS = {
+    "MNQ=F": 20,   # 20 × $0.25 = 5 pts  (MNQ moves fast)
+    "MES=F": 12,   # 12 × $0.25 = 3 pts
+    "MGC=F": 15,   # 15 × $0.10 = 1.5 pts
+}
+
+def _entry_is_fresh(signal: dict, symbol: str) -> bool:
+    """Return True if the signal entry is within the staleness threshold of the live 1m price."""
+    entry = signal.get("entry")
+    if entry is None:
+        return True  # no entry to check
+    try:
+        df1m = fetch_data(symbol, "1m", "7d")
+        if df1m.empty:
+            return True  # can't check, let it through
+        live_price = float(df1m["Close"].iloc[-1])
+        tick_sz    = TICK_INFO[symbol]["tick"]
+        max_ticks  = _MAX_ENTRY_STALENESS_TICKS.get(symbol, 20)
+        diff_ticks = abs(entry - live_price) / tick_sz
+        if diff_ticks > max_ticks:
+            print(f"[staleness] {symbol} entry {entry} vs live {live_price:.2f} = {diff_ticks:.0f} ticks — REJECTED")
+            return False
+    except Exception as e:
+        print(f"[staleness] check failed for {symbol}: {e}")
+    return True
+
 # Minimum score magnitude required to record a signal per symbol
 # Based on trade log analysis: low-score signals have poor win rates
 _MIN_RECORD_SCORE = {
@@ -789,6 +819,10 @@ def should_record_signal(signal: dict, symbol: str) -> bool:
     - Not a duplicate fingerprint (same direction + similar score) within 30 min
     """
     if signal["direction"] == "NEUTRAL":
+        return False
+
+    # Staleness gate — reject if live price has drifted too far from entry
+    if not _entry_is_fresh(signal, symbol):
         return False
 
     # Per-symbol score gate
