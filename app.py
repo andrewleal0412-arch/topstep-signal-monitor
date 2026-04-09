@@ -1555,12 +1555,8 @@ def render_instrument(symbol: str, interval: str, period: str):
     news_sentiment  = get_news_sentiment(symbol, articles)
     signal          = generate_signal(df, symbol, news_sentiment, htf_bias_15m=htf_bias_15m, htf_bias_1h=htf_bias_1h)
 
-    # ── check / update open trades ──
+    # ── check / update open trades (worker.py handles recording new signals) ──
     trades = check_open_trades(symbol, df)
-
-    # ── record new signal (deduplication via JSON file, not session state) ──
-    if should_record_signal(signal, symbol):
-        record_signal(signal, symbol, interval)  # record_signal handles the notification
 
     last = df.iloc[-1]
     prev = df.iloc[-2] if len(df) > 1 else last
@@ -2409,12 +2405,11 @@ def render_dashboard(interval: str, period: str):
 
             # Close any open trades first (outside cache), then record new signal if conditions met
             full_sig = sig.get("_full")
+            # Worker.py handles recording — app only checks/closes open trades
             if full_sig:
                 _df_live = fetch_data(symbol, interval, period)
                 if not _df_live.empty:
                     check_open_trades(symbol, _df_live)
-                if should_record_signal(full_sig, symbol):
-                    record_signal(full_sig, symbol, interval)  # record_signal handles the notification
 
             if d == "LONG":
                 bg      = "linear-gradient(135deg,#0d2b1a,#0a1f12)"
