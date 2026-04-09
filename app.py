@@ -60,7 +60,7 @@ def send_notification(symbol: str, signal: dict, ti: dict):
 
     d        = signal["direction"]
     name     = ti["name"]
-    strength = min(int(abs(score) / 12.0 * 100), 99)
+    strength = min(int(abs(score) / 14.0 * 100), 99)
     tick_sz  = ti["tick"]
     sl_ticks = abs(signal["entry"] - signal["sl"])  / tick_sz
     tp1_ticks= abs(signal["entry"] - signal["tp1"]) / tick_sz
@@ -1827,7 +1827,7 @@ def render_instrument(symbol: str, interval: str, period: str):
         d     = open_trade.get("direction", d)
     else:
         score = signal["score"]
-    strength = min(abs(score) / 12.0 * 100, 99)
+    strength = min(abs(score) / 14.0 * 100, 99)
 
     if d == "LONG":
         banner_cls, icon, dir_color, dir_html = "sig-banner-long",  "📈", "#30d158", tip("LONG","Long")
@@ -1853,7 +1853,7 @@ def render_instrument(symbol: str, interval: str, period: str):
   </div>
   <div class="sig-right">
     <div class="sig-score-num" style="color:{dir_color}">{score:+.1f}</div>
-    <div class="sig-score-lbl">score / 12.0</div>
+    <div class="sig-score-lbl">score / 14.0</div>
     <div class="sig-score-lbl" style="margin-top:4px">{strength:.0f}% strength</div>
   </div>
 </div>
@@ -2311,7 +2311,7 @@ def render_trade_log():
             # Signal strength at entry
             score = t.get("score", None)
             if score is not None:
-                strength = min(int(abs(score) / 12.0 * 100), 99)
+                strength = min(int(abs(score) / 14.0 * 100), 99)
                 if strength >= 70:
                     strength_color = "#30d158"
                 elif strength >= 45:
@@ -2468,20 +2468,20 @@ def render_settings_tab():
     )
     min_score = st.slider(
         "Only alert me when signal strength is at least",
-        min_value=2.0, max_value=12.0, step=0.5,
+        min_value=2.0, max_value=14.0, step=0.5,
         value=float(cfg.get("min_score", 4.0)),
         key="ntfy_min_score",
-        help="Score 4–5 is the historical sweet spot (100% win rate). Max possible score is now 12.0 with FVG + HTF layers."
+        help="Score 4–6 is the sweet spot. Max possible score is 14.0 with candle patterns, S/R, FVG + HTF layers."
     )
     # Show what the selected score means in context
-    pct = min(int(min_score / 12.0 * 100), 99)
-    if min_score < 3.0:
+    pct = min(int(min_score / 14.0 * 100), 99)
+    if min_score < 3.5:
         score_label, score_color = "low threshold — many alerts, lower accuracy", "#fbbf24"
-    elif min_score < 4.0:
+    elif min_score < 5.0:
         score_label, score_color = "moderate — good for monitoring", "#fbbf24"
-    elif min_score <= 5.5:
-        score_label, score_color = "optimal — historical sweet spot ✅", "#30d158"
     elif min_score <= 7.0:
+        score_label, score_color = "optimal — historical sweet spot ✅", "#30d158"
+    elif min_score <= 9.0:
         score_label, score_color = "high — fewer alerts, watch for overextension", "#fbbf24"
     else:
         score_label, score_color = "very high — signals may be overextended ⚠️", "#ff375f"
@@ -2582,7 +2582,7 @@ def render_dashboard(interval: str, period: str):
                 icon    = "●"
                 label   = "WAITING"
 
-            strength = min(int(abs(score) / 12.0 * 100), 99)
+            strength = min(int(abs(score) / 14.0 * 100), 99)
             price_str = f"{price:,.2f}" if price else "—"
             sess_on, sess_reason, _ = trading_session_active(symbol)
             sess_badge = ('<div style="margin-top:10px;font-size:9px;font-weight:700;letter-spacing:0.07em;'

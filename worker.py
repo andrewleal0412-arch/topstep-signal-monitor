@@ -154,7 +154,7 @@ def send_notification(symbol: str, trade: dict):
 
     ti       = TICK_INFO[symbol]
     d        = trade["direction"]
-    strength = min(int(abs(trade["score"]) / 12.0 * 100), 99)
+    strength = min(int(abs(trade["score"]) / 14.0 * 100), 99)
     sl_ticks = abs(trade["entry"] - trade["sl"]) / ti["tick"]
     tp1_ticks= abs(trade["entry"] - trade["tp1"]) / ti["tick"]
 
