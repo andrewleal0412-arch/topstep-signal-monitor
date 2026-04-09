@@ -49,16 +49,25 @@ _MAX_ENTRY_STALENESS_TICKS = {
     "MGC=F": 15,   # 15 × $0.10 = 1.5 pts
 }
 
+def _get_live_price(symbol: str) -> float | None:
+    """Fetch the most recent 1m close as a proxy for live price."""
+    try:
+        df1m = fetch_data(symbol, "1m", "1d")
+        if not df1m.empty:
+            return float(df1m["Close"].iloc[-1])
+    except Exception:
+        pass
+    return None
+
 def _entry_is_fresh(signal: dict, symbol: str) -> bool:
     """Reject signal if live 1m price has drifted too far from the entry."""
     entry = signal.get("entry")
     if entry is None:
         return True
     try:
-        df1m = fetch_data(symbol, "1m", "7d")
-        if df1m.empty:
+        live_price = _get_live_price(symbol)
+        if live_price is None:
             return True
-        live_price = float(df1m["Close"].iloc[-1])
         tick_sz    = TICK_INFO[symbol]["tick"]
         max_ticks  = _MAX_ENTRY_STALENESS_TICKS.get(symbol, 20)
         diff_ticks = abs(entry - live_price) / tick_sz
@@ -594,7 +603,72 @@ def should_record(signal: dict, symbol: str) -> bool:
         pass
     return True
 
+def _verify_and_correct_signal(signal: dict, symbol: str) -> dict | None:
+    """
+    Cross-check signal entry/TP/SL against live 1m price.
+    - Rewrites entry to actual live price (not stale 5m candle)
+    - Recalculates TP/SL from that corrected entry
+    - Rejects if the direction no longer makes sense at live price
+    Returns corrected signal or None if it fails verification.
+    """
+    live_price = _get_live_price(symbol)
+    if live_price is None:
+        log.warning(f"[verify] {symbol} — can't fetch live price, rejecting signal")
+        return None
+
+    tick = TICK_INFO[symbol]["tick"]
+    old_entry = float(signal["entry"])
+    drift_ticks = abs(old_entry - live_price) / tick
+
+    # If entry is more than 10 ticks from live, rewrite entry to live price
+    if drift_ticks > 10:
+        log.info(f"[verify] {symbol} correcting entry {old_entry:.2f} → {live_price:.2f} (drift={drift_ticks:.0f} ticks)")
+
+    # Use live price as the real entry
+    entry = _snap(live_price, tick)
+    atr = float(signal.get("atr", 1.0))
+    if atr < tick:
+        atr = tick * 10  # safety floor
+
+    sl_mult = float(load_config().get("sl_multipliers", {}).get(symbol, 1.5))
+    sl_mult = max(1.0, min(2.5, sl_mult))
+
+    if signal["direction"] == "LONG":
+        sl  = _snap(entry - sl_mult * atr, tick)
+        tp1 = _snap(entry + sl_mult * atr, tick)
+        tp2 = _snap(entry + sl_mult * 2 * atr, tick)
+        # Sanity: SL must be below entry, TPs above
+        if sl >= entry or tp1 <= entry:
+            log.warning(f"[verify] {symbol} LONG failed sanity — sl={sl} entry={entry} tp1={tp1}")
+            return None
+    else:
+        sl  = _snap(entry + sl_mult * atr, tick)
+        tp1 = _snap(entry - sl_mult * atr, tick)
+        tp2 = _snap(entry - sl_mult * 2 * atr, tick)
+        if sl <= entry or tp1 >= entry:
+            log.warning(f"[verify] {symbol} SHORT failed sanity — sl={sl} entry={entry} tp1={tp1}")
+            return None
+
+    # Reward/risk ratio check — TP1 must be at least 0.8× the SL distance
+    risk = abs(entry - sl)
+    reward = abs(tp1 - entry)
+    if risk == 0 or reward / risk < 0.8:
+        log.warning(f"[verify] {symbol} bad R:R — risk={risk:.2f} reward={reward:.2f}")
+        return None
+
+    signal = dict(signal)
+    signal.update(entry=entry, sl=sl, tp1=tp1, tp2=tp2)
+    log.info(f"[verify] {symbol} PASS — entry={entry:.2f} sl={sl:.2f} tp1={tp1:.2f} tp2={tp2:.2f}")
+    return signal
+
 def record_signal(signal: dict, symbol: str):
+    # Final verification — correct entry to live price, sanity-check TP/SL
+    verified = _verify_and_correct_signal(signal, symbol)
+    if verified is None:
+        log.warning(f"[record] {symbol} signal FAILED verification — not recording")
+        return
+    signal = verified
+
     trade = {
         "id":        str(uuid.uuid4())[:8],
         "symbol":    symbol,
@@ -617,12 +691,26 @@ def record_signal(signal: dict, symbol: str):
     send_notification(symbol, trade)
 
 # ─── Main Loop ────────────────────────────────────────────────────────────────
+def _has_open_trade(symbol: str) -> bool:
+    """Check Supabase for any open trade on this symbol."""
+    trades = load_trades()
+    return any(t["status"] == "open" and t["symbol"] == symbol for t in trades)
+
 def run_once():
     log.info("── tick ──")
     articles = fetch_news()
     for symbol in ACTIVE_SYMBOLS:
         time.sleep(15)  # avoid yfinance rate limiting
         try:
+            # ── If a trade is open: ONLY check TP/SL, skip everything else ──
+            if _has_open_trade(symbol):
+                log.info(f"{TICK_INFO[symbol]['name']}  IN TRADE — checking TP/SL only")
+                df = fetch_data(symbol, "5m", "60d")
+                if not df.empty:
+                    check_open_trades(symbol, df)
+                continue
+
+            # ── No open trade: generate signals ─────────────────────────────
             df = fetch_data(symbol, "5m", "60d")
             if df.empty:
                 log.warning(f"{symbol}: no data")
@@ -646,10 +734,6 @@ def run_once():
             def _bl(b): return "BUL" if b == 1 else "BEA" if b == -1 else "NEU"
             log.info(f"{TICK_INFO[symbol]['name']}  {sig['direction']:7}  score={sig['score']:+.2f}  1h={_bl(htf_bias_1h)}  15m={_bl(htf_bias_15m)}")
 
-            # Always check open trades first
-            check_open_trades(symbol, df)
-
-            # Then record new signal if conditions met
             if should_record(sig, symbol):
                 record_signal(sig, symbol)
 
