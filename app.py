@@ -1920,35 +1920,45 @@ def render_trade_log():
 </div>
 """, unsafe_allow_html=True)
 
-    # ── In-hours vs Off-hours win rates ──────────────────────────────────────
+    # ── Avg duration cards ────────────────────────────────────────────────────
     closed = [t for t in all_trades if t["status"] != "open"]
-    in_h   = [t for t in closed if t["symbol"] in _SESSION_GATE_EXEMPT or trade_in_session(t["symbol"], t["timestamp"])]
-    off_h  = [t for t in closed if t["symbol"] not in _SESSION_GATE_EXEMPT and not trade_in_session(t["symbol"], t["timestamp"])]
 
-    def _wr(trades_subset):
-        if not trades_subset:
-            return 0, 0, 0
-        wins = sum(1 for t in trades_subset if t["status"].startswith("win"))
-        return round(wins / len(trades_subset) * 100), wins, len(trades_subset) - wins
+    def _avg_dur(trades_subset):
+        mins_list = []
+        for t in trades_subset:
+            try:
+                t_open   = datetime.fromisoformat(t["timestamp"])
+                t_closed = datetime.fromisoformat(t["closed_at"])
+                mins_list.append((t_closed - t_open).total_seconds() / 60)
+            except Exception:
+                pass
+        if not mins_list:
+            return None
+        return sum(mins_list) / len(mins_list)
 
-    in_wr,  in_w,  in_l  = _wr(in_h)
-    off_wr, off_w, off_l = _wr(off_h)
-    in_color  = "#30d158" if in_wr  >= 55 else ("#ffd60a" if in_wr  >= 40 else "#ff375f")
-    off_color = "#30d158" if off_wr >= 55 else ("#ffd60a" if off_wr >= 40 else "#ff375f")
+    def _fmt_mins(m):
+        if m is None: return "—"
+        m = int(m)
+        return f"{m}m" if m < 60 else f"{m//60}h {m%60:02d}m"
+
+    wins_closed  = [t for t in closed if t["status"].startswith("win")]
+    losses_closed= [t for t in closed if t["status"] == "loss"]
+    avg_win_dur  = _avg_dur(wins_closed)
+    avg_loss_dur = _avg_dur(losses_closed)
 
     col_in, col_off = st.columns(2)
     col_in.markdown(f"""
 <div style="background:#1c1c1e;border:1px solid rgba(52,211,153,0.2);border-radius:12px;padding:16px 20px">
-  <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;color:#34d399;margin-bottom:10px">IN HOURS</div>
-  <div style="font-size:2em;font-weight:800;color:{in_color}">{in_wr}%</div>
-  <div style="font-size:11px;color:#8e8e93;margin-top:4px">{in_w}W / {in_l}L &nbsp;·&nbsp; {len(in_h)} closed trades</div>
+  <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;color:#34d399;margin-bottom:10px">AVG WIN DURATION</div>
+  <div style="font-size:2em;font-weight:800;color:#30d158">{_fmt_mins(avg_win_dur)}</div>
+  <div style="font-size:11px;color:#8e8e93;margin-top:4px">{len(wins_closed)} winning trades</div>
 </div>""", unsafe_allow_html=True)
 
     col_off.markdown(f"""
-<div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:16px 20px">
-  <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;color:#636366;margin-bottom:10px">OFF HOURS</div>
-  <div style="font-size:2em;font-weight:800;color:{off_color}">{off_wr}%</div>
-  <div style="font-size:11px;color:#8e8e93;margin-top:4px">{off_w}W / {off_l}L &nbsp;·&nbsp; {len(off_h)} closed trades</div>
+<div style="background:#1c1c1e;border:1px solid rgba(255,59,48,0.15);border-radius:12px;padding:16px 20px">
+  <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;color:#ff375f;margin-bottom:10px">AVG LOSS DURATION</div>
+  <div style="font-size:2em;font-weight:800;color:#ff375f">{_fmt_mins(avg_loss_dur)}</div>
+  <div style="font-size:11px;color:#8e8e93;margin-top:4px">{len(losses_closed)} losing trades</div>
 </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -2043,21 +2053,31 @@ def render_trade_log():
             except Exception:
                 ts = t["timestamp"][:16]
 
-            in_sess = t["symbol"] in _SESSION_GATE_EXEMPT or trade_in_session(t["symbol"], t["timestamp"])
-            sess_badge = ('<span style="font-size:10px;font-weight:700;color:#34d399">IN HOURS</span>'
-                         if in_sess else
-                         '<span style="font-size:10px;font-weight:700;color:#636366">OFF HOURS</span>')
+            # Duration — time from entry to close
+            try:
+                t_open   = datetime.fromisoformat(t["timestamp"])
+                t_closed = datetime.fromisoformat(t["closed_at"]) if t.get("closed_at") else None
+                if t_closed:
+                    mins = int((t_closed - t_open).total_seconds() / 60)
+                    if mins < 60:
+                        dur_str = f"{mins}m"
+                    else:
+                        dur_str = f"{mins//60}h {mins%60:02d}m"
+                else:
+                    dur_str = "open"
+            except Exception:
+                dur_str = "—"
 
             rows += f"""
 <tr>
   <td style="color:#636366;white-space:nowrap">{ts}</td>
   <td><b style="color:#f5f5f7">{name}</b></td>
   <td>{dir_badge}</td>
-  <td>{sess_badge}</td>
   <td class="mono" style="color:#f5f5f7">{t['entry']:,.2f}</td>
   <td class="mono" style="color:#ff375f">{t['sl']:,.2f}</td>
   <td class="mono" style="color:#30d158">{t['tp1']:,.2f}</td>
   <td class="mono" style="color:#34c759">{t['tp2']:,.2f}</td>
+  <td style="color:#94a3b8;font-weight:500">{dur_str}</td>
   <td style="color:{ticks_color};font-weight:600">{ticks_str}</td>
   <td style="color:{strength_color};font-weight:600">{strength_str}</td>
   <td style="color:{dollar_color};font-weight:600">{dollar_str}</td>
@@ -2071,11 +2091,11 @@ def render_trade_log():
     <th>Date / Time (PT)</th>
     <th>Market</th>
     <th>Trade</th>
-    <th>Session</th>
     <th>Entry Price</th>
     <th>Stop</th>
     <th>Target 1</th>
     <th>Target 2</th>
+    <th>Duration</th>
     <th>Ticks</th>
     <th>Strength</th>
     <th>P&amp;L</th>
