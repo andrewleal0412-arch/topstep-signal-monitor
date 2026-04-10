@@ -691,10 +691,12 @@ def check_open_trades(symbol: str, df: pd.DataFrame):
         return
 
     # Always use 1m candles for TP/SL — catches every wick, most precise
+    using_1m = False
     try:
         df_1m = fetch_data(symbol, "1m", "7d")
         if not df_1m.empty:
             df = df_1m
+            using_1m = True
     except Exception:
         pass
 
@@ -717,7 +719,14 @@ def check_open_trades(symbol: str, df: pd.DataFrame):
         except Exception:
             continue
 
-        after = after.iloc[:-1]  # drop last incomplete candle — its wick isn't final
+        # For 1m candles: only drop the very last if it's < 30s old (truly incomplete).
+        # For wider timeframes: always drop last (could be minutes of incomplete data).
+        if using_1m:
+            # 1m candles close every 60s — by the time we check, the last one is
+            # almost always already closed. Keep all candles.
+            pass
+        else:
+            after = after.iloc[:-1]  # drop last incomplete candle for 5m+ data
 
         if after.empty:
             continue
@@ -798,6 +807,25 @@ def should_record(signal: dict, symbol: str) -> bool:
                 return False
     except Exception:
         pass
+
+    # ── Consecutive loss breaker ─────────────────────────────────────────────
+    # If the last 2 trades in the same direction were both losses, block that
+    # direction for 2 hours. The market is clearly fighting the thesis.
+    recent_same_dir = [t for t in sym_trades if t.get("direction") == signal["direction"]][-3:]
+    if len(recent_same_dir) >= 2:
+        last_two = recent_same_dir[-2:]
+        if all(t.get("status") == "loss" for t in last_two):
+            try:
+                last_loss_time = datetime.fromisoformat(last_two[-1]["timestamp"])
+                if last_loss_time.tzinfo is None:
+                    last_loss_time = last_loss_time.replace(tzinfo=PT)
+                since_last = (now_pt() - last_loss_time).total_seconds()
+                if since_last < 7200:  # 2 hours
+                    log.warning(f"[loss-breaker] {symbol} 2 consecutive {signal['direction']} losses — blocking for {(7200-since_last)/60:.0f} more min")
+                    return False
+            except Exception:
+                pass
+
     return True
 
 def _verify_and_correct_signal(signal: dict, symbol: str) -> dict | None:
