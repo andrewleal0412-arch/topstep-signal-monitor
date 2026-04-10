@@ -546,91 +546,97 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
 
     last, prev = df.iloc[-2], df.iloc[-3]  # use last CLOSED candle, not the live open one
     score = 0.0
+    reasons: list[str] = []
 
     # EMA stack
-    if   last["EMA9"] > last["EMA21"] > last["EMA50"]: score += 2
-    elif last["EMA9"] < last["EMA21"] < last["EMA50"]: score -= 2
-    elif last["EMA9"] > last["EMA21"]:                  score += 1
-    else:                                               score -= 1
+    if   last["EMA9"] > last["EMA21"] > last["EMA50"]: score += 2;  reasons.append("EMA bull stack +2")
+    elif last["EMA9"] < last["EMA21"] < last["EMA50"]: score -= 2;  reasons.append("EMA bear stack -2")
+    elif last["EMA9"] > last["EMA21"]:                  score += 1;  reasons.append("EMA9>21 +1")
+    else:                                               score -= 1;  reasons.append("EMA9<21 -1")
 
     # Fresh crossover
-    if   prev["EMA9"] <= prev["EMA21"] and last["EMA9"] > last["EMA21"]: score += 1
-    elif prev["EMA9"] >= prev["EMA21"] and last["EMA9"] < last["EMA21"]: score -= 1
+    if   prev["EMA9"] <= prev["EMA21"] and last["EMA9"] > last["EMA21"]: score += 1; reasons.append("bull crossover +1")
+    elif prev["EMA9"] >= prev["EMA21"] and last["EMA9"] < last["EMA21"]: score -= 1; reasons.append("bear crossover -1")
 
     # RSI — clean non-overlapping bands
     rsi = float(last["RSI"])
-    if   rsi < 35:          score += 1
-    elif rsi > 65:          score -= 1
-    elif rsi < 45:          score -= 0.5   # leaning bearish
-    elif rsi > 55:          score += 0.5   # leaning bullish
+    if   rsi < 35:          score += 1;   reasons.append(f"RSI oversold {rsi:.0f} +1")
+    elif rsi > 65:          score -= 1;   reasons.append(f"RSI overbought {rsi:.0f} -1")
+    elif rsi < 45:          score -= 0.5; reasons.append(f"RSI lean bear {rsi:.0f} -0.5")
+    elif rsi > 55:          score += 0.5; reasons.append(f"RSI lean bull {rsi:.0f} +0.5")
 
     # MACD
-    if   last["MACD"] > last["MACD_signal"] and float(last["MACD_hist"]) > float(prev["MACD_hist"]): score += 1
-    elif last["MACD"] < last["MACD_signal"] and float(last["MACD_hist"]) < float(prev["MACD_hist"]): score -= 1
+    if   last["MACD"] > last["MACD_signal"] and float(last["MACD_hist"]) > float(prev["MACD_hist"]): score += 1; reasons.append("MACD bull +1")
+    elif last["MACD"] < last["MACD_signal"] and float(last["MACD_hist"]) < float(prev["MACD_hist"]): score -= 1; reasons.append("MACD bear -1")
 
     # VWAP
-    if float(last["Close"]) > float(last["VWAP"]): score += 0.5
-    else:                                           score -= 0.5
+    if float(last["Close"]) > float(last["VWAP"]): score += 0.5; reasons.append("above VWAP +0.5")
+    else:                                           score -= 0.5; reasons.append("below VWAP -0.5")
 
     # Bollinger
-    if   float(last["Close"]) < float(last["BB_lower"]): score += 0.5
-    elif float(last["Close"]) > float(last["BB_upper"]): score -= 0.5
+    if   float(last["Close"]) < float(last["BB_lower"]): score += 0.5; reasons.append("below BB lower +0.5")
+    elif float(last["Close"]) > float(last["BB_upper"]): score -= 0.5; reasons.append("above BB upper -0.5")
 
     # News
-    score += ns.get("adjustment", 0)
+    ns_adj = ns.get("adjustment", 0)
+    if ns_adj != 0:
+        score += ns_adj
+        reasons.append(f"news sentiment {ns_adj:+.2f}")
 
     # 1h trend filter (macro — confirms direction, doesn't flip it)
     if htf_bias_1h == 1:
-        if score > 0:   score += 1.5  # aligned LONG — full boost
-        elif score < 0: score += 1.0  # counter-trend SHORT — moderate penalty
+        if score > 0:   score += 1.5; reasons.append("1h bull confirms +1.5")
+        elif score < 0: score += 1.0; reasons.append("1h bull counter -1.0")
     elif htf_bias_1h == -1:
-        if score < 0:   score -= 1.5  # aligned SHORT — full boost
-        elif score > 0: score -= 1.0  # counter-trend LONG — moderate penalty
+        if score < 0:   score -= 1.5; reasons.append("1h bear confirms -1.5")
+        elif score > 0: score -= 1.0; reasons.append("1h bear counter +1.0")
 
     # 15m trend filter (intermediate)
     if htf_bias_15m == 1:
-        if score > 0:   score += 1.0  # aligned LONG
-        elif score < 0: score += 0.75 # counter-trend SHORT — light penalty
+        if score > 0:   score += 1.0;  reasons.append("15m bull confirms +1.0")
+        elif score < 0: score += 0.75; reasons.append("15m bull counter -0.75")
     elif htf_bias_15m == -1:
-        if score < 0:   score -= 1.0  # aligned SHORT
-        elif score > 0: score -= 0.75 # counter-trend LONG — light penalty
+        if score < 0:   score -= 1.0;  reasons.append("15m bear confirms -1.0")
+        elif score > 0: score -= 0.75; reasons.append("15m bear counter +0.75")
 
     # ── Fair Value Gap scoring ────────────────────────────────────────────────
     fvg = detect_fvg(df)
     if fvg["in_bullish_fvg"]:
-        score += 1.5
+        score += 1.5; reasons.append("in bullish FVG +1.5")
     elif fvg["in_bearish_fvg"]:
-        score -= 1.5
+        score -= 1.5; reasons.append("in bearish FVG -1.5")
     else:
         nb = fvg["nearest_bull"]
         nd = fvg["nearest_bear"]
         price = float(last["Close"])
         if nb and nb["bottom"] < price:
-            score += 0.5
+            score += 0.5; reasons.append("near bullish FVG +0.5")
         elif nd and nd["top"] > price:
-            score -= 0.5
+            score -= 0.5; reasons.append("near bearish FVG -0.5")
 
     # ── Candlestick pattern scoring ──────────────────────────────────────────
     candles = detect_candle_patterns(df)
     score += candles["score"]
+    if candles["patterns"]:
+        reasons.append(f"candles: {', '.join(candles['patterns'])} ({candles['score']:+.2f})")
 
     # ── Support & Resistance scoring ─────────────────────────────────────────
     sr = detect_sr_levels(df)
     if sr["at_support"]:
-        score += 1.0   # price bouncing off support = bullish
+        score += 1.0; reasons.append("at support +1.0")
     if sr["at_resistance"]:
-        score -= 1.0   # price hitting resistance = bearish
+        score -= 1.0; reasons.append("at resistance -1.0")
     # Reward trades with clear room to run (nearest target not blocked by S/R)
     if score > 0 and sr["nearest_resistance"]:
         room = sr["nearest_resistance"] - float(last["Close"])
         atr_val = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
         if room < 0.5 * atr_val:
-            score -= 0.75  # resistance too close for a LONG to work
+            score -= 0.75; reasons.append("resistance too close -0.75")
     if score < 0 and sr["nearest_support"]:
         room = float(last["Close"]) - sr["nearest_support"]
         atr_val = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
         if room < 0.5 * atr_val:
-            score += 0.75  # support too close for a SHORT to work
+            score += 0.75; reasons.append("support too close +0.75")
 
     score  = round(score, 2)
 
@@ -642,6 +648,23 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
         if atr < atr_20_pct:
             log.info(f"[{symbol}] ATR {atr:.4f} below 20th percentile ({atr_20_pct:.4f}) — skipping choppy market")
             return {**empty, "score": score, "fvg": fvg}
+
+    # ── Momentum exhaustion filter ────────────────────────────────────────────
+    # If price has already moved > 2× ATR in the signal direction over the last
+    # 10 candles, the move is likely exhausted — don't chase it.
+    if len(df) >= 12:
+        lookback_close = float(df["Close"].iloc[-12])  # 10 closed candles ago
+        current_close  = float(last["Close"])
+        move = current_close - lookback_close  # positive = up, negative = down
+        if atr > 0:
+            move_atr = move / atr
+            if move_atr > 2.0:
+                log.info(f"[{symbol}] momentum exhaustion — up-move {move_atr:.1f}× ATR, penalizing LONG")
+                score -= 1.0; reasons.append(f"exhausted up-move {move_atr:.1f}x ATR -1.0")
+            elif move_atr < -2.0:
+                log.info(f"[{symbol}] momentum exhaustion — down-move {abs(move_atr):.1f}× ATR, penalizing SHORT")
+                score += 1.0; reasons.append(f"exhausted down-move {abs(move_atr):.1f}x ATR +1.0")
+        score = round(score, 2)
 
     if   score >= 2.5: direction = "LONG"
     elif score <= -2.5: direction = "SHORT"
@@ -665,7 +688,7 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
         tp2   = _snap(price - sl_mult * 2 * atr, tick)
 
     return {"direction": direction, "score": score, "entry": entry,
-            "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr, "reasons": [], "fvg": fvg}
+            "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr, "reasons": reasons, "fvg": fvg}
 
 # ─── Session Gate ─────────────────────────────────────────────────────────────
 def trading_session_active(symbol: str) -> tuple:
@@ -803,10 +826,13 @@ def should_record(signal: dict, symbol: str) -> bool:
         if elapsed < 1200 and last.get("direction") != signal["direction"]:
             log.info(f"[cooldown] {symbol} direction flip blocked — only {elapsed/60:.0f}m since last trade")
             return False
-        # Same direction + similar score within 30 min = duplicate
-        if elapsed < 1800:
-            if (last.get("direction") == signal["direction"] and
-                abs(last.get("score", 0) - signal.get("score", 0)) < 1.0):
+        # Same direction within 30 min = duplicate (regardless of score)
+        if elapsed < 1800 and last.get("direction") == signal["direction"]:
+            return False
+        # Same direction within 45 min after a loss — re-entering too soon
+        if elapsed < 2700 and last.get("direction") == signal["direction"]:
+            if last.get("status") == "loss":
+                log.info(f"[cooldown] {symbol} same-dir re-entry after loss blocked — only {elapsed/60:.0f}m elapsed")
                 return False
         # Same entry price within 1 hour = stale repeat
         if elapsed < 3600:
