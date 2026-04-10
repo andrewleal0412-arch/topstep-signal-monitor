@@ -213,12 +213,14 @@ def fetch_news() -> list:
 
 def get_news_sentiment(symbol: str, articles: list) -> dict:
     groups   = SYMBOL_GROUPS.get(symbol, [])
+    # Only use high-impact macro news that actually moves gold
     relevant = [a for a in articles
-                if any(g in a["groups"] for g in groups) or a["high_impact"]]
+                if a["high_impact"] and any(g in a["groups"] for g in groups)]
     if not relevant:
         return {"score": 0, "adjustment": 0, "count": 0}
     avg = sum(a["compound"] for a in relevant) / len(relevant)
-    adj = max(-1.5, min(1.5, avg * 3))
+    # Cap at ±0.5 — news should nudge, not override technicals
+    adj = max(-0.5, min(0.5, avg * 2))
     return {"score": avg, "adjustment": adj, "count": len(relevant)}
 
 # ─── Data & Indicators ────────────────────────────────────────────────────────
@@ -555,12 +557,12 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     if   prev["EMA9"] <= prev["EMA21"] and last["EMA9"] > last["EMA21"]: score += 1
     elif prev["EMA9"] >= prev["EMA21"] and last["EMA9"] < last["EMA21"]: score -= 1
 
-    # RSI
+    # RSI — clean non-overlapping bands
     rsi = float(last["RSI"])
     if   rsi < 35:          score += 1
     elif rsi > 65:          score -= 1
-    elif 48 < rsi < 62:     score += 0.5
-    elif 38 < rsi < 52:     score -= 0.5
+    elif rsi < 45:          score -= 0.5   # leaning bearish
+    elif rsi > 55:          score += 0.5   # leaning bullish
 
     # MACD
     if   last["MACD"] > last["MACD_signal"] and float(last["MACD_hist"]) > float(prev["MACD_hist"]): score += 1
@@ -577,21 +579,21 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     # News
     score += ns.get("adjustment", 0)
 
-    # 1h trend filter (macro — highest weight)
+    # 1h trend filter (macro — confirms direction, doesn't flip it)
     if htf_bias_1h == 1:
-        if score > 0:   score += 1.5  # aligned LONG
-        elif score < 0: score += 2.0  # counter-trend SHORT heavily penalized
+        if score > 0:   score += 1.5  # aligned LONG — full boost
+        elif score < 0: score += 1.0  # counter-trend SHORT — moderate penalty
     elif htf_bias_1h == -1:
-        if score < 0:   score -= 1.5  # aligned SHORT
-        elif score > 0: score -= 2.0  # counter-trend LONG heavily penalized
+        if score < 0:   score -= 1.5  # aligned SHORT — full boost
+        elif score > 0: score -= 1.0  # counter-trend LONG — moderate penalty
 
     # 15m trend filter (intermediate)
     if htf_bias_15m == 1:
         if score > 0:   score += 1.0  # aligned LONG
-        elif score < 0: score += 1.5  # counter-trend SHORT weakened
+        elif score < 0: score += 0.75 # counter-trend SHORT — light penalty
     elif htf_bias_15m == -1:
         if score < 0:   score -= 1.0  # aligned SHORT
-        elif score > 0: score -= 1.5  # counter-trend LONG weakened
+        elif score > 0: score -= 0.75 # counter-trend LONG — light penalty
 
     # ── Fair Value Gap scoring ────────────────────────────────────────────────
     fvg = detect_fvg(df)
@@ -632,11 +634,18 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
 
     score  = round(score, 2)
 
+    # Low-ATR filter — skip signals in choppy, low-volatility markets
+    atr   = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
+    atr_series = df["ATR"].dropna()
+    if len(atr_series) >= 20:
+        atr_20_pct = atr_series.iloc[-20:].quantile(0.20)
+        if atr < atr_20_pct:
+            log.info(f"[{symbol}] ATR {atr:.4f} below 20th percentile ({atr_20_pct:.4f}) — skipping choppy market")
+            return {**empty, "score": score, "fvg": fvg}
+
     if   score >= 2.5: direction = "LONG"
     elif score <= -2.5: direction = "SHORT"
     else: return {**empty, "score": score, "fvg": fvg}
-
-    atr   = float(last["ATR"]) if pd.notna(last["ATR"]) else 1.0
     price = float(last["Close"])
     tick  = TICK_INFO.get(symbol, {}).get("tick", 0.25)
 
