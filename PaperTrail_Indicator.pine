@@ -1,0 +1,393 @@
+// This Pine Script™ source code is subject to the terms of the Mozilla Public License 2.0
+// © PaperTrail Signal Monitor
+
+//@version=5
+indicator("PaperTrail — MGC Signal Engine", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// ─── INPUTS ──────────────────────────────────────────────────────────────────
+grp_ema  = "EMA Settings"
+ema9Len  = input.int(9,   "EMA 9 Length",  group=grp_ema)
+ema21Len = input.int(21,  "EMA 21 Length", group=grp_ema)
+ema50Len = input.int(50,  "EMA 50 Length", group=grp_ema)
+showEMAs = input.bool(true, "Show EMAs on chart", group=grp_ema)
+
+grp_sig  = "Signal Settings"
+minScore    = input.float(2.5,  "Minimum score to trigger signal", step=0.5, group=grp_sig)
+slMult      = input.float(1.5,  "SL multiplier (× ATR)", step=0.1, minval=1.0, maxval=2.5, group=grp_sig)
+atrLen      = input.int(14,     "ATR Length", group=grp_sig)
+showSignals = input.bool(true,  "Show BUY/SELL arrows", group=grp_sig)
+showLevels  = input.bool(true,  "Show Entry/TP/SL levels", group=grp_sig)
+
+grp_sr   = "Support & Resistance"
+srLookback  = input.int(80,  "S/R Lookback candles", group=grp_sr, minval=20, maxval=200)
+srThreshold = input.float(0.3, "S/R proximity (%)", step=0.1, group=grp_sr)
+showSR      = input.bool(true, "Show S/R levels", group=grp_sr)
+
+grp_fvg  = "Fair Value Gaps"
+showFVG     = input.bool(true, "Show FVG zones", group=grp_fvg)
+fvgLookback = input.int(50,   "FVG Lookback candles", group=grp_fvg, minval=10, maxval=100)
+
+grp_tbl  = "Score Panel"
+showTable   = input.bool(true, "Show score breakdown panel", group=grp_tbl)
+tblPos      = input.string("Top Right", "Panel position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=grp_tbl)
+
+// ─── INDICATORS ──────────────────────────────────────────────────────────────
+ema9  = ta.ema(close, ema9Len)
+ema21 = ta.ema(close, ema21Len)
+ema50 = ta.ema(close, ema50Len)
+rsiVal = ta.rsi(close, 14)
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+atrVal = ta.atr(atrLen)
+
+// Bollinger Bands
+bbBasis = ta.sma(close, 20)
+bbDev   = 2.0 * ta.stdev(close, 20)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+// VWAP
+vwapVal = ta.vwap(hlc3)
+
+// Plot EMAs
+plot(showEMAs ? ema9  : na, "EMA 9",  color=color.new(#00bcd4, 0), linewidth=1)
+plot(showEMAs ? ema21 : na, "EMA 21", color=color.new(#ff9800, 0), linewidth=1)
+plot(showEMAs ? ema50 : na, "EMA 50", color=color.new(#9c27b0, 0), linewidth=2)
+
+// ─── SCORING ENGINE ──────────────────────────────────────────────────────────
+// Use confirmed (closed) candle data via [1]
+float score = 0.0
+
+// EMA stack
+ema9_1  = ema9[1]
+ema21_1 = ema21[1]
+ema50_1 = ema50[1]
+ema9_2  = ema9[2]
+ema21_2 = ema21[2]
+
+score += ema9_1 > ema21_1 and ema21_1 > ema50_1 ? 2.0 :
+         ema9_1 < ema21_1 and ema21_1 < ema50_1 ? -2.0 :
+         ema9_1 > ema21_1 ? 1.0 : -1.0
+
+// Fresh crossover
+score += ema9_2 <= ema21_2 and ema9_1 > ema21_1 ? 1.0 :
+         ema9_2 >= ema21_2 and ema9_1 < ema21_1 ? -1.0 : 0.0
+
+// RSI
+rsi_1 = rsiVal[1]
+score += rsi_1 < 35 ? 1.0 : rsi_1 > 65 ? -1.0 :
+         rsi_1 > 48 and rsi_1 < 62 ? 0.5 :
+         rsi_1 > 38 and rsi_1 < 52 ? -0.5 : 0.0
+
+// MACD
+macd_1 = macdLine[1]
+sig_1  = signalLine[1]
+hist_1 = histLine[1]
+hist_2 = histLine[2]
+score += macd_1 > sig_1 and hist_1 > hist_2 ? 1.0 :
+         macd_1 < sig_1 and hist_1 < hist_2 ? -1.0 : 0.0
+
+// VWAP
+score += close[1] > vwapVal[1] ? 0.5 : -0.5
+
+// Bollinger Bands
+score += close[1] < bbLower[1] ? 0.5 : close[1] > bbUpper[1] ? -0.5 : 0.0
+
+// ─── HIGHER TIMEFRAME BIAS (15m) ────────────────────────────────────────────
+// Request 15m EMAs for HTF confirmation
+ema9_15m  = request.security(syminfo.tickerid, "15", ta.ema(close, ema9Len))
+ema21_15m = request.security(syminfo.tickerid, "15", ta.ema(close, ema21Len))
+ema50_15m = request.security(syminfo.tickerid, "15", ta.ema(close, ema50Len))
+macd_15m  = request.security(syminfo.tickerid, "15", macdLine)
+sig_15m   = request.security(syminfo.tickerid, "15", signalLine)
+rsi_15m   = request.security(syminfo.tickerid, "15", rsiVal)
+vwap_15m  = request.security(syminfo.tickerid, "15", vwapVal)
+
+float htf15 = 0.0
+htf15 += ema9_15m > ema21_15m and ema21_15m > ema50_15m ? 2.0 :
+         ema9_15m < ema21_15m and ema21_15m < ema50_15m ? -2.0 :
+         ema9_15m > ema21_15m ? 1.0 : -1.0
+htf15 += macd_15m > sig_15m ? 1.0 : -1.0
+htf15 += rsi_15m > 55 ? 0.5 : rsi_15m < 45 ? -0.5 : 0.0
+htf15 += close > vwap_15m ? 0.5 : -0.5
+
+int bias15m = htf15 >= 2.0 ? 1 : htf15 <= -2.0 ? -1 : 0
+score += bias15m == 1 ? (score > 0 ? 1.0 : 1.5) :
+         bias15m == -1 ? (score < 0 ? -1.0 : -1.5) : 0.0
+
+// ─── HIGHER TIMEFRAME BIAS (1h) ─────────────────────────────────────────────
+ema9_1h  = request.security(syminfo.tickerid, "60", ta.ema(close, ema9Len))
+ema21_1h = request.security(syminfo.tickerid, "60", ta.ema(close, ema21Len))
+ema50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, ema50Len))
+macd_1h  = request.security(syminfo.tickerid, "60", macdLine)
+sig_1h   = request.security(syminfo.tickerid, "60", signalLine)
+rsi_1h   = request.security(syminfo.tickerid, "60", rsiVal)
+vwap_1h  = request.security(syminfo.tickerid, "60", vwapVal)
+
+float htf1h = 0.0
+htf1h += ema9_1h > ema21_1h and ema21_1h > ema50_1h ? 2.0 :
+         ema9_1h < ema21_1h and ema21_1h < ema50_1h ? -2.0 :
+         ema9_1h > ema21_1h ? 1.0 : -1.0
+htf1h += macd_1h > sig_1h ? 1.0 : -1.0
+htf1h += rsi_1h > 55 ? 0.5 : rsi_1h < 45 ? -0.5 : 0.0
+htf1h += close > vwap_1h ? 0.5 : -0.5
+
+int bias1h = htf1h >= 2.0 ? 1 : htf1h <= -2.0 ? -1 : 0
+score += bias1h == 1 ? (score > 0 ? 1.5 : 2.0) :
+         bias1h == -1 ? (score < 0 ? -1.5 : -2.0) : 0.0
+
+// ─── CANDLESTICK PATTERNS ────────────────────────────────────────────────────
+o1 = open[1],  h1 = high[1],  l1 = low[1],  c1 = close[1]
+o2 = open[2],  h2 = high[2],  l2 = low[2],  c2 = close[2]
+o3 = open[3],  h3 = high[3],  l3 = low[3],  c3 = close[3]
+
+body1 = math.abs(c1 - o1)
+body2 = math.abs(c2 - o2)
+range1 = h1 - l1 > 0 ? h1 - l1 : 0.001
+range2 = h2 - l2 > 0 ? h2 - l2 : 0.001
+upperWick1 = h1 - math.max(o1, c1)
+lowerWick1 = math.min(o1, c1) - l1
+
+// Bullish engulfing
+bullEngulf = c2 < o2 and c1 > o1 and c1 > o2 and o1 < c2
+score += bullEngulf ? 1.0 : 0.0
+
+// Bearish engulfing
+bearEngulf = c2 > o2 and c1 < o1 and c1 < o2 and o1 > c2
+score += bearEngulf ? -1.0 : 0.0
+
+// Hammer
+isHammer = body1 > 0 and lowerWick1 >= 2.0 * body1 and upperWick1 < body1 and c1 > o1
+score += isHammer ? 0.75 : 0.0
+
+// Shooting star
+isShootingStar = body1 > 0 and upperWick1 >= 2.0 * body1 and lowerWick1 < body1 and c1 < o1
+score += isShootingStar ? -0.75 : 0.0
+
+// Pin bars (if not already hammer/shooting star)
+bullPin = lowerWick1 >= 0.66 * range1 and c1 > o1 and not isHammer
+score += bullPin ? 0.5 : 0.0
+
+bearPin = upperWick1 >= 0.66 * range1 and c1 < o1 and not isShootingStar
+score += bearPin ? -0.5 : 0.0
+
+// Morning star
+c3mid = (o3 + c3) / 2.0
+smallBody2 = body2 < 0.4 * range2
+morningStar = c3 < o3 and smallBody2 and c1 > o1 and c1 > c3mid and body1 > body2 * 2
+score += morningStar ? 1.0 : 0.0
+
+// Evening star
+eveningStar = c3 > o3 and smallBody2 and c1 < o1 and c1 < c3mid and body1 > body2 * 2
+score += eveningStar ? -1.0 : 0.0
+
+// Doji detection (for display only)
+isDoji = body1 < 0.1 * range1
+
+// ─── SUPPORT & RESISTANCE ────────────────────────────────────────────────────
+// Find nearest swing high/low as S/R
+var float nearestSupport    = na
+var float nearestResistance = na
+
+isSwingHigh = high[2] > high[1] and high[2] > high[3] and high[2] > high[4] and high[2] > high[0]
+isSwingLow  = low[2]  < low[1]  and low[2]  < low[3]  and low[2]  < low[4]  and low[2]  < low[0]
+
+if isSwingHigh
+    nearestResistance := high[2]
+if isSwingLow
+    nearestSupport := low[2]
+
+// S/R scoring
+srProx = close[1] * srThreshold / 100.0
+atSupport    = not na(nearestSupport)    and math.abs(close[1] - nearestSupport) < srProx
+atResistance = not na(nearestResistance) and math.abs(close[1] - nearestResistance) < srProx
+
+score += atSupport    ? 1.0  : 0.0
+score += atResistance ? -1.0 : 0.0
+
+// Room check — penalize if S/R blocks the target
+if score > 0 and not na(nearestResistance) and nearestResistance > close[1]
+    room = nearestResistance - close[1]
+    if room < 0.5 * atrVal[1]
+        score += -0.75
+
+if score < 0 and not na(nearestSupport) and nearestSupport < close[1]
+    room = close[1] - nearestSupport
+    if room < 0.5 * atrVal[1]
+        score += 0.75
+
+// ─── FVG DETECTION ───────────────────────────────────────────────────────────
+// Bullish FVG: candle[i-2].High < candle[i].Low (gap up)
+// Bearish FVG: candle[i-2].Low  > candle[i].High (gap down)
+bullFVG = high[3] < low[1]
+bearFVG = low[3]  > high[1]
+inBullFVG = bullFVG and close[1] >= high[3] and close[1] <= low[1]
+inBearFVG = bearFVG and close[1] <= low[3]  and close[1] >= high[1]
+
+score += inBullFVG ? 1.5 : inBearFVG ? -1.5 : 0.0
+
+// Draw FVG boxes
+if showFVG and bullFVG
+    box.new(bar_index - 3, low[1], bar_index, high[3],
+            border_color=color.new(#30d158, 70), bgcolor=color.new(#30d158, 90))
+
+if showFVG and bearFVG
+    box.new(bar_index - 3, low[3], bar_index, high[1],
+            border_color=color.new(#ff375f, 70), bgcolor=color.new(#ff375f, 90))
+
+// ─── FINAL SCORE & DIRECTION ─────────────────────────────────────────────────
+score := math.round(score * 100) / 100  // round to 2 decimals
+
+bool isLong  = score >= minScore
+bool isShort = score <= -minScore
+string direction = isLong ? "LONG" : isShort ? "SHORT" : "NEUTRAL"
+
+float entryPrice = close[1]
+float slPrice    = isLong  ? entryPrice - slMult * atrVal[1] :
+                   isShort ? entryPrice + slMult * atrVal[1] : na
+float tp1Price   = isLong  ? entryPrice + slMult * atrVal[1] :
+                   isShort ? entryPrice - slMult * atrVal[1] : na
+float tp2Price   = isLong  ? entryPrice + slMult * 2 * atrVal[1] :
+                   isShort ? entryPrice - slMult * 2 * atrVal[1] : na
+
+float strength = math.min(math.abs(score) / 14.0 * 100, 99)
+
+// ─── SIGNAL ARROWS ───────────────────────────────────────────────────────────
+// Only fire on fresh signals (wasn't a signal on previous bar)
+float prevScore = score[1]
+bool freshLong  = isLong  and not (prevScore >= minScore)
+bool freshShort = isShort and not (prevScore <= -minScore)
+
+plotshape(showSignals and freshLong,  title="BUY Signal",  style=shape.labelup,
+          location=location.belowbar, color=#30d158, textcolor=color.white,
+          text="BUY", size=size.normal)
+
+plotshape(showSignals and freshShort, title="SELL Signal", style=shape.labeldown,
+          location=location.abovebar, color=#ff375f, textcolor=color.white,
+          text="SELL", size=size.normal)
+
+// Pattern labels
+if bullEngulf
+    label.new(bar_index, low - atrVal * 0.3, "Engulf", color=#30d158, textcolor=color.white, size=size.tiny, style=label.style_label_up)
+if bearEngulf
+    label.new(bar_index, high + atrVal * 0.3, "Engulf", color=#ff375f, textcolor=color.white, size=size.tiny, style=label.style_label_down)
+if isHammer
+    label.new(bar_index, low - atrVal * 0.3, "Hammer", color=#30d158, textcolor=color.white, size=size.tiny, style=label.style_label_up)
+if isShootingStar
+    label.new(bar_index, high + atrVal * 0.3, "Star", color=#ff375f, textcolor=color.white, size=size.tiny, style=label.style_label_down)
+if morningStar
+    label.new(bar_index, low - atrVal * 0.3, "Morning★", color=#30d158, textcolor=color.white, size=size.tiny, style=label.style_label_up)
+if eveningStar
+    label.new(bar_index, high + atrVal * 0.3, "Evening★", color=#ff375f, textcolor=color.white, size=size.tiny, style=label.style_label_down)
+
+// ─── TP / SL LEVELS ──────────────────────────────────────────────────────────
+// Draw on fresh signals only
+if showLevels and freshLong
+    line.new(bar_index, entryPrice, bar_index + 20, entryPrice, color=#f5f5f7, style=line.style_solid, width=2)
+    line.new(bar_index, slPrice,    bar_index + 20, slPrice,    color=#ff375f, style=line.style_dashed, width=1)
+    line.new(bar_index, tp1Price,   bar_index + 20, tp1Price,   color=#30d158, style=line.style_dashed, width=1)
+    line.new(bar_index, tp2Price,   bar_index + 20, tp2Price,   color=#34c759, style=line.style_dotted, width=1)
+    label.new(bar_index + 21, entryPrice, "Entry " + str.tostring(entryPrice, "#.##"), color=color.new(color.gray, 80), textcolor=#f5f5f7, size=size.tiny)
+    label.new(bar_index + 21, slPrice,    "SL " + str.tostring(slPrice, "#.##"),       color=color.new(#ff375f, 80), textcolor=#ff375f, size=size.tiny)
+    label.new(bar_index + 21, tp1Price,   "TP1 " + str.tostring(tp1Price, "#.##"),     color=color.new(#30d158, 80), textcolor=#30d158, size=size.tiny)
+    label.new(bar_index + 21, tp2Price,   "TP2 " + str.tostring(tp2Price, "#.##"),     color=color.new(#34c759, 80), textcolor=#34c759, size=size.tiny)
+
+if showLevels and freshShort
+    line.new(bar_index, entryPrice, bar_index + 20, entryPrice, color=#f5f5f7, style=line.style_solid, width=2)
+    line.new(bar_index, slPrice,    bar_index + 20, slPrice,    color=#ff375f, style=line.style_dashed, width=1)
+    line.new(bar_index, tp1Price,   bar_index + 20, tp1Price,   color=#30d158, style=line.style_dashed, width=1)
+    line.new(bar_index, tp2Price,   bar_index + 20, tp2Price,   color=#34c759, style=line.style_dotted, width=1)
+    label.new(bar_index + 21, entryPrice, "Entry " + str.tostring(entryPrice, "#.##"), color=color.new(color.gray, 80), textcolor=#f5f5f7, size=size.tiny)
+    label.new(bar_index + 21, slPrice,    "SL " + str.tostring(slPrice, "#.##"),       color=color.new(#ff375f, 80), textcolor=#ff375f, size=size.tiny)
+    label.new(bar_index + 21, tp1Price,   "TP1 " + str.tostring(tp1Price, "#.##"),     color=color.new(#30d158, 80), textcolor=#30d158, size=size.tiny)
+    label.new(bar_index + 21, tp2Price,   "TP2 " + str.tostring(tp2Price, "#.##"),     color=color.new(#34c759, 80), textcolor=#34c759, size=size.tiny)
+
+// ─── S/R LINES ───────────────────────────────────────────────────────────────
+plot(showSR and not na(nearestSupport)    ? nearestSupport    : na, "Support",    color=color.new(#30d158, 40), linewidth=1, style=plot.style_cross)
+plot(showSR and not na(nearestResistance) ? nearestResistance : na, "Resistance", color=color.new(#ff375f, 40), linewidth=1, style=plot.style_cross)
+
+// ─── BACKGROUND COLOR (signal strength) ──────────────────────────────────────
+bgcolor(isLong  ? color.new(#30d158, 92) :
+        isShort ? color.new(#ff375f, 92) : na)
+
+// ─── SCORE TABLE ─────────────────────────────────────────────────────────────
+var tblPosition = tblPos == "Top Right" ? position.top_right :
+                  tblPos == "Top Left" ? position.top_left :
+                  tblPos == "Bottom Right" ? position.bottom_right : position.bottom_left
+
+if showTable and barstate.islast
+    var table scorePanel = table.new(tblPosition, 2, 14, bgcolor=color.new(#1c1c1e, 10), border_color=color.new(color.white, 85), border_width=1)
+
+    dirColor = isLong ? #30d158 : isShort ? #ff375f : #8e8e93
+    biasStr15 = bias15m == 1 ? "BULL" : bias15m == -1 ? "BEAR" : "NEU"
+    biasStr1h = bias1h  == 1 ? "BULL" : bias1h  == -1 ? "BEAR" : "NEU"
+    biasClr15 = bias15m == 1 ? #30d158 : bias15m == -1 ? #ff375f : #8e8e93
+    biasClr1h = bias1h  == 1 ? #30d158 : bias1h  == -1 ? #ff375f : #8e8e93
+
+    table.cell(scorePanel, 0, 0, "PaperTrail",  text_color=#6366f1, text_size=size.normal, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 0, direction,      text_color=dirColor, text_size=size.normal, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 1, "Score",        text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 1, str.tostring(score, "#.##") + " / 14.0", text_color=dirColor, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 2, "Strength",     text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 2, str.tostring(strength, "#") + "%", text_color=dirColor, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 3, "──────",       text_color=#3a3a3c, text_size=size.small)
+    table.cell(scorePanel, 1, 3, "──────",       text_color=#3a3a3c, text_size=size.small)
+
+    table.cell(scorePanel, 0, 4, "RSI",          text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 4, str.tostring(rsi_1, "#.#"), text_color=rsi_1 > 55 ? #30d158 : rsi_1 < 45 ? #ff375f : #8e8e93, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 5, "1h Bias",      text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 5, biasStr1h,       text_color=biasClr1h, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 6, "15m Bias",     text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 6, biasStr15,       text_color=biasClr15, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 7, "ATR",          text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 7, str.tostring(atrVal, "#.##"), text_color=#f5f5f7, text_size=size.small, text_halign=text.align_right)
+
+    // Candle pattern row
+    string candleStr = bullEngulf ? "Bull Engulf" : bearEngulf ? "Bear Engulf" :
+                       isHammer ? "Hammer" : isShootingStar ? "Shoot Star" :
+                       morningStar ? "Morning★" : eveningStar ? "Evening★" :
+                       isDoji ? "Doji" : "—"
+    color candleClr = bullEngulf or isHammer or morningStar ? #30d158 :
+                      bearEngulf or isShootingStar or eveningStar ? #ff375f : #8e8e93
+
+    table.cell(scorePanel, 0, 8, "Candle",       text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 8, candleStr,       text_color=candleClr, text_size=size.small, text_halign=text.align_right)
+
+    // S/R row
+    string srStr = atSupport ? "AT SUPPORT" : atResistance ? "AT RESIST" : "Clear"
+    color srClr  = atSupport ? #30d158 : atResistance ? #ff375f : #8e8e93
+
+    table.cell(scorePanel, 0, 9, "S/R",          text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 9, srStr,           text_color=srClr, text_size=size.small, text_halign=text.align_right)
+
+    // FVG row
+    string fvgStr = inBullFVG ? "IN BULL FVG" : inBearFVG ? "IN BEAR FVG" : "—"
+    color fvgClr  = inBullFVG ? #30d158 : inBearFVG ? #ff375f : #8e8e93
+
+    table.cell(scorePanel, 0, 10, "FVG",          text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+    table.cell(scorePanel, 1, 10, fvgStr,          text_color=fvgClr, text_size=size.small, text_halign=text.align_right)
+
+    table.cell(scorePanel, 0, 11, "──────",       text_color=#3a3a3c, text_size=size.small)
+    table.cell(scorePanel, 1, 11, "──────",       text_color=#3a3a3c, text_size=size.small)
+
+    // TP/SL display
+    if isLong or isShort
+        table.cell(scorePanel, 0, 12, "Entry",    text_color=#f5f5f7, text_size=size.small, text_halign=text.align_left)
+        table.cell(scorePanel, 1, 12, str.tostring(entryPrice, "#.##"), text_color=#f5f5f7, text_size=size.small, text_halign=text.align_right)
+        table.cell(scorePanel, 0, 13, "SL / TP1", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
+        table.cell(scorePanel, 1, 13, str.tostring(slPrice, "#.##") + " / " + str.tostring(tp1Price, "#.##"),
+                   text_color=#ffd60a, text_size=size.small, text_halign=text.align_right)
+    else
+        table.cell(scorePanel, 0, 12, "",          text_color=#8e8e93, text_size=size.small)
+        table.cell(scorePanel, 1, 12, "No signal", text_color=#8e8e93, text_size=size.small, text_halign=text.align_right)
+        table.cell(scorePanel, 0, 13, "",          text_color=#8e8e93, text_size=size.small)
+        table.cell(scorePanel, 1, 13, "",          text_color=#8e8e93, text_size=size.small)
+
+// ─── ALERTS ──────────────────────────────────────────────────────────────────
+alertcondition(freshLong,  title="PaperTrail BUY",  message="PaperTrail BUY signal — Score: {{plot_0}} | Entry: {{close}}")
+alertcondition(freshShort, title="PaperTrail SELL", message="PaperTrail SELL signal — Score: {{plot_0}} | Entry: {{close}}")
