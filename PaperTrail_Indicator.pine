@@ -1,5 +1,5 @@
 //@version=5
-indicator("PaperTrail - MGC Signal Engine", overlay=true, max_lines_count=20, max_labels_count=20, max_boxes_count=10)
+indicator("PaperTrail - MGC Signal Engine", overlay=true, max_lines_count=20, max_labels_count=50, max_boxes_count=10)
 
 // --- INPUTS ---
 grp_ema = "EMA Settings"
@@ -11,6 +11,7 @@ showEMAs = input.bool(true, "Show EMAs on chart", group=grp_ema)
 grp_sig = "Signal Settings"
 minScore = input.float(2.5, "Minimum score to trigger signal", step=0.5, group=grp_sig)
 slMult = input.float(1.5, "SL multiplier (x ATR)", step=0.1, minval=1.0, maxval=2.5, group=grp_sig)
+tpMult = input.float(1.0, "TP1 multiplier (x ATR)", step=0.1, minval=0.5, maxval=2.5, group=grp_sig)
 atrLen = input.int(14, "ATR Length", group=grp_sig)
 
 grp_sr = "Support & Resistance"
@@ -19,6 +20,12 @@ srThreshold = input.float(0.3, "S/R proximity (%)", step=0.1, group=grp_sr)
 grp_tbl = "Score Panel"
 showTable = input.bool(true, "Show score panel", group=grp_tbl)
 tblPos = input.string("Top Right", "Panel position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=grp_tbl)
+
+grp_hist = "Trade History"
+showHistory = input.bool(true, "Show trade history panel", group=grp_hist)
+useTP2 = input.bool(false, "Use TP2 as target (default TP1)", group=grp_hist)
+maxHistory = input.int(50, "Max trades to track", minval=10, maxval=200, group=grp_hist)
+tickSize = input.float(0.10, "Tick size ($)", step=0.01, group=grp_hist)
 
 // --- INDICATORS ---
 ema9 = ta.ema(close, ema9Len)
@@ -193,8 +200,8 @@ string direction = isLong ? "LONG" : isShort ? "SHORT" : "NEUTRAL"
 
 float entryPrice = close[1]
 float slPrice = isLong ? entryPrice - slMult * atrVal[1] : isShort ? entryPrice + slMult * atrVal[1] : na
-float tp1Price = isLong ? entryPrice + slMult * atrVal[1] : isShort ? entryPrice - slMult * atrVal[1] : na
-float tp2Price = isLong ? entryPrice + slMult * 2 * atrVal[1] : isShort ? entryPrice - slMult * 2 * atrVal[1] : na
+float tp1Price = isLong ? entryPrice + tpMult * atrVal[1] : isShort ? entryPrice - tpMult * atrVal[1] : na
+float tp2Price = isLong ? entryPrice + tpMult * 2 * atrVal[1] : isShort ? entryPrice - tpMult * 2 * atrVal[1] : na
 
 float strength = math.min(math.abs(score) / 14.0 * 100, 99)
 
@@ -206,7 +213,7 @@ bool freshShort = isShort and not (prevScore <= -minScore)
 plotshape(freshLong, title="BUY Signal", style=shape.triangleup, location=location.belowbar, color=#30d158, size=size.small)
 plotshape(freshShort, title="SELL Signal", style=shape.triangledown, location=location.abovebar, color=#ff375f, size=size.small)
 
-// --- ENTRY/TP/SL LINES (last signal only) ---
+// --- ENTRY/TP/SL LINES (declared early so trade tracking can clear them) ---
 var line entryLine = na
 var line slLine = na
 var line tp1Line = na
@@ -216,6 +223,116 @@ var label slLbl = na
 var label tp1Lbl = na
 var label tp2Lbl = na
 
+// --- TRADE HISTORY TRACKING ---
+// Trade state: 0 = no trade, 1 = long, -1 = short
+var int tradeState = 0
+var float tradeEntry = na
+var float tradeSL = na
+var float tradeTP = na
+var int tradeBar = 0
+
+// History arrays
+var array<float> histPnl = array.new_float(0)
+var array<int> histDir = array.new_int(0)
+var array<int> histOutcome = array.new_int(0)  // 1=win, -1=loss
+var array<float> histEntry = array.new_float(0)
+var array<float> histExit = array.new_float(0)
+var array<int> histBarIn = array.new_int(0)
+var array<int> histBarOut = array.new_int(0)
+
+// Check open trade for TP/SL hit
+if tradeState != 0
+    bool hitTP = false
+    bool hitSL = false
+    if tradeState == 1
+        hitTP := high >= tradeTP
+        hitSL := low <= tradeSL
+    else
+        hitTP := low <= tradeTP
+        hitSL := high >= tradeSL
+    // If both hit on same bar, use close vs entry to decide
+    if hitTP and hitSL
+        hitTP := (tradeState == 1 and close >= tradeEntry) or (tradeState == -1 and close <= tradeEntry)
+        hitSL := not hitTP
+    if hitTP
+        float pnl = math.abs(tradeTP - tradeEntry) / tickSize
+        array.push(histPnl, pnl)
+        array.push(histDir, tradeState)
+        array.push(histOutcome, 1)
+        array.push(histEntry, tradeEntry)
+        array.push(histExit, tradeTP)
+        array.push(histBarIn, tradeBar)
+        array.push(histBarOut, bar_index)
+        tradeState := 0
+        line.delete(entryLine)
+        line.delete(slLine)
+        line.delete(tp1Line)
+        line.delete(tp2Line)
+        label.delete(entryLbl)
+        label.delete(slLbl)
+        label.delete(tp1Lbl)
+        label.delete(tp2Lbl)
+    else if hitSL
+        float pnl = -math.abs(tradeSL - tradeEntry) / tickSize
+        array.push(histPnl, pnl)
+        array.push(histDir, tradeState)
+        array.push(histOutcome, -1)
+        array.push(histEntry, tradeEntry)
+        array.push(histExit, tradeSL)
+        array.push(histBarIn, tradeBar)
+        array.push(histBarOut, bar_index)
+        tradeState := 0
+        line.delete(entryLine)
+        line.delete(slLine)
+        line.delete(tp1Line)
+        line.delete(tp2Line)
+        label.delete(entryLbl)
+        label.delete(slLbl)
+        label.delete(tp1Lbl)
+        label.delete(tp2Lbl)
+
+// Open new trade on fresh signal (close any existing first)
+if freshLong or freshShort
+    // If there's an open trade, close it at current price
+    if tradeState != 0
+        float exitP = close[1]
+        float pnl = tradeState == 1 ? (exitP - tradeEntry) / tickSize : (tradeEntry - exitP) / tickSize
+        array.push(histPnl, pnl)
+        array.push(histDir, tradeState)
+        array.push(histOutcome, pnl > 0 ? 1 : -1)
+        array.push(histEntry, tradeEntry)
+        array.push(histExit, exitP)
+        array.push(histBarIn, tradeBar)
+        array.push(histBarOut, bar_index)
+    tradeState := freshLong ? 1 : -1
+    tradeEntry := entryPrice
+    tradeSL := slPrice
+    tradeTP := useTP2 ? tp2Price : tp1Price
+    tradeBar := bar_index
+
+// Trim history if over max
+if array.size(histPnl) > maxHistory
+    array.shift(histPnl)
+    array.shift(histDir)
+    array.shift(histOutcome)
+    array.shift(histEntry)
+    array.shift(histExit)
+    array.shift(histBarIn)
+    array.shift(histBarOut)
+
+// Win/loss markers on chart
+int hSize = array.size(histOutcome)
+if hSize > 0 and array.size(histBarOut) > 0
+    int lastBar = array.get(histBarOut, hSize - 1)
+    if lastBar == bar_index
+        int lastOutcome = array.get(histOutcome, hSize - 1)
+        float lastExit = array.get(histExit, hSize - 1)
+        if lastOutcome == 1
+            label.new(bar_index, lastExit, "W", color=color.new(#30d158, 20), textcolor=#ffffff, size=size.tiny, style=label.style_circle)
+        else
+            label.new(bar_index, lastExit, "L", color=color.new(#ff375f, 20), textcolor=#ffffff, size=size.tiny, style=label.style_circle)
+
+// --- ENTRY/TP/SL LINES (draw on fresh signal) ---
 if freshLong or freshShort
     // Delete old lines/labels
     line.delete(entryLine)
@@ -239,47 +356,195 @@ if freshLong or freshShort
 // --- SUBTLE BACKGROUND TINT ---
 bgcolor(isLong ? color.new(#30d158, 95) : isShort ? color.new(#ff375f, 95) : na)
 
-// --- SCORE PANEL (compact, like the dashboard) ---
+// --- SCORE PANEL (styled to match PaperTrail dashboard) ---
 tblPosition = tblPos == "Top Right" ? position.top_right : tblPos == "Top Left" ? position.top_left : tblPos == "Bottom Right" ? position.bottom_right : position.bottom_left
 
 if showTable and barstate.islast
-    var table panel = table.new(tblPosition, 2, 8, bgcolor=color.new(#1c1c1e, 5), border_color=color.new(#3a3a3c, 50), border_width=1)
+    // Dark navy base with subtle border — matches website card style
+    var table panel = table.new(tblPosition, 2, 10, bgcolor=color.new(#0f1520, 0), frame_color=color.new(#1e293b, 30), frame_width=1, border_color=color.new(#1e293b, 70), border_width=1)
 
-    dirColor = isLong ? #30d158 : isShort ? #ff375f : #8e8e93
+    dirColor = isLong ? #34d399 : isShort ? #f87171 : #64748b
     biasStr15 = bias15m == 1 ? "BULL" : bias15m == -1 ? "BEAR" : "NEU"
     biasStr1h = bias1h == 1 ? "BULL" : bias1h == -1 ? "BEAR" : "NEU"
-    biasClr15 = bias15m == 1 ? #30d158 : bias15m == -1 ? #ff375f : #8e8e93
-    biasClr1h = bias1h == 1 ? #30d158 : bias1h == -1 ? #ff375f : #8e8e93
+    biasClr15 = bias15m == 1 ? #34d399 : bias15m == -1 ? #f87171 : #64748b
+    biasClr1h = bias1h == 1 ? #34d399 : bias1h == -1 ? #f87171 : #64748b
+
+    // Header background — indigo accent like the website brand
+    headerBg = color.new(#131a2b, 0)
+    rowBg1 = color.new(#0c1018, 0)
+    rowBg2 = color.new(#0f1520, 0)
+
+    // Row 0: Brand header with accent bar feel
+    table.cell(panel, 0, 0, "  PaperTrail", text_color=#818cf8, text_size=size.normal, text_halign=text.align_left, bgcolor=headerBg)
+    table.cell(panel, 1, 0, direction + "  ", text_color=dirColor, text_size=size.normal, text_halign=text.align_right, bgcolor=headerBg)
+
+    // Row 1: Divider row — thin accent line effect
+    accentBg = isLong ? color.new(#34d399, 85) : isShort ? color.new(#f87171, 85) : color.new(#818cf8, 85)
+    table.cell(panel, 0, 1, "", text_color=#0f1520, text_size=size.tiny, bgcolor=accentBg)
+    table.cell(panel, 1, 1, "", text_color=#0f1520, text_size=size.tiny, bgcolor=accentBg)
+
+    // Row 2: Score
+    table.cell(panel, 0, 2, "  Score", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowBg1)
+    table.cell(panel, 1, 2, str.tostring(score, "#.##") + " / 14  ", text_color=#e2e8f0, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg1)
+
+    // Row 3: Strength with visual bar
+    int barFilled = math.round(strength / 10)
+    string strengthBar = ""
+    for i = 0 to 9
+        strengthBar += i < barFilled ? ">" : "-"
+    table.cell(panel, 0, 3, "  Strength", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowBg2)
+    table.cell(panel, 1, 3, str.tostring(strength, "#") + "%  " + strengthBar + "  ", text_color=dirColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg2)
+
+    // Row 4: RSI
+    rsiColor = rsi_1 > 55 ? #34d399 : rsi_1 < 45 ? #f87171 : #64748b
+    table.cell(panel, 0, 4, "  RSI", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowBg1)
+    table.cell(panel, 1, 4, str.tostring(rsi_1, "#.#") + "  ", text_color=rsiColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg1)
+
+    // Row 5: MACD
+    macdBull = macd_1 > sig_1
+    macdColor = macdBull ? #34d399 : #f87171
+    macdStr = macdBull ? "BULL" : "BEAR"
+    table.cell(panel, 0, 5, "  MACD", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowBg2)
+    table.cell(panel, 1, 5, macdStr + "  ", text_color=macdColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg2)
+
+    // Row 6: 1h Bias
+    table.cell(panel, 0, 6, "  1h Bias", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowBg1)
+    table.cell(panel, 1, 6, biasStr1h + "  ", text_color=biasClr1h, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg1)
+
+    // Row 7: 15m Bias
+    table.cell(panel, 0, 7, "  15m Bias", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowBg2)
+    table.cell(panel, 1, 7, biasStr15 + "  ", text_color=biasClr15, text_size=size.small, text_halign=text.align_right, bgcolor=rowBg2)
+
+    // Row 8: Entry / Row 9: SL (red) + TP (green) or "No signal"
+    if isLong or isShort
+        sigBg = isLong ? color.new(#052e16, 30) : color.new(#2d0a0a, 30)
+        table.cell(panel, 0, 8, "  E: " + str.tostring(entryPrice, "#.##"), text_color=#e2e8f0, text_size=size.small, text_halign=text.align_left, bgcolor=sigBg)
+        table.cell(panel, 1, 8, "", bgcolor=sigBg)
+        table.cell(panel, 0, 9, "  SL " + str.tostring(slPrice, "#.##"), text_color=#f87171, text_size=size.small, text_halign=text.align_left, bgcolor=sigBg)
+        table.cell(panel, 1, 9, "TP " + str.tostring(tp1Price, "#.##") + "  ", text_color=#34d399, text_size=size.small, text_halign=text.align_right, bgcolor=sigBg)
+    else
+        table.cell(panel, 0, 8, "", bgcolor=color.new(#0c1018, 0))
+        table.cell(panel, 1, 8, "Waiting for signal  ", text_color=#475569, text_size=size.small, text_halign=text.align_right, bgcolor=color.new(#0c1018, 0))
+        table.cell(panel, 0, 9, "", bgcolor=color.new(#0c1018, 0))
+        table.cell(panel, 1, 9, "", bgcolor=color.new(#0c1018, 0))
+
+// --- TRADE HISTORY PANEL ---
+if showHistory and barstate.islast
+    var table histPanel = table.new(position.bottom_right, 2, 12, bgcolor=color.new(#0f1520, 0), frame_color=color.new(#1e293b, 30), frame_width=1, border_color=color.new(#1e293b, 70), border_width=1)
+
+    int totalTrades = array.size(histPnl)
+    int wins = 0
+    int losses = 0
+    float totalPnl = 0.0
+    float grossWin = 0.0
+    float grossLoss = 0.0
+    int longWins = 0
+    int longTotal = 0
+    int shortWins = 0
+    int shortTotal = 0
+    int streak = 0
+    bool streakSet = false
+
+    if totalTrades > 0
+        for i = 0 to totalTrades - 1
+            float p = array.get(histPnl, i)
+            int o = array.get(histOutcome, i)
+            int d = array.get(histDir, i)
+            totalPnl += p
+            if o == 1
+                wins += 1
+                grossWin += p
+            else
+                losses += 1
+                grossLoss += p
+            if d == 1
+                longTotal += 1
+                if o == 1
+                    longWins += 1
+            else
+                shortTotal += 1
+                if o == 1
+                    shortWins += 1
+        // Calculate current streak from most recent trade
+        for i = totalTrades - 1 to 0
+            int o = array.get(histOutcome, i)
+            if not streakSet
+                streak := o
+                streakSet := true
+            else
+                if o == streak / math.abs(streak)
+                    streak += o
+                else
+                    break
+
+    float winRate = totalTrades > 0 ? wins / totalTrades * 100.0 : 0.0
+    float avgWin = wins > 0 ? grossWin / wins : 0.0
+    float avgLoss = losses > 0 ? grossLoss / losses : 0.0
+    float profitFactor = grossLoss != 0 ? math.abs(grossWin / grossLoss) : grossWin > 0 ? 999.0 : 0.0
+    float longWR = longTotal > 0 ? longWins / longTotal * 100.0 : 0.0
+    float shortWR = shortTotal > 0 ? shortWins / shortTotal * 100.0 : 0.0
+
+    headerBg2 = color.new(#131a2b, 0)
+    rowA = color.new(#0c1018, 0)
+    rowB = color.new(#0f1520, 0)
+    pnlColor = totalPnl >= 0 ? #34d399 : #f87171
+    wrColor = winRate >= 50 ? #34d399 : #f87171
+    streakColor = streak >= 0 ? #34d399 : #f87171
+    pfColor = profitFactor >= 1.0 ? #34d399 : #f87171
+    tradeStatus = tradeState == 1 ? "LONG OPEN" : tradeState == -1 ? "SHORT OPEN" : "FLAT"
+    statusColor = tradeState == 1 ? #34d399 : tradeState == -1 ? #f87171 : #64748b
 
     // Row 0: Header
-    table.cell(panel, 0, 0, "PaperTrail", text_color=#6366f1, text_size=size.normal, text_halign=text.align_left)
-    table.cell(panel, 1, 0, direction, text_color=dirColor, text_size=size.normal, text_halign=text.align_right)
-    // Row 1: Score
-    table.cell(panel, 0, 1, "Score", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
-    table.cell(panel, 1, 1, str.tostring(score, "#.##") + " / 14", text_color=dirColor, text_size=size.small, text_halign=text.align_right)
-    // Row 2: Strength
-    table.cell(panel, 0, 2, "Strength", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
-    table.cell(panel, 1, 2, str.tostring(strength, "#") + "%", text_color=dirColor, text_size=size.small, text_halign=text.align_right)
-    // Row 3: RSI
-    table.cell(panel, 0, 3, "RSI", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
-    table.cell(panel, 1, 3, str.tostring(rsi_1, "#.#"), text_color=rsi_1 > 55 ? #30d158 : rsi_1 < 45 ? #ff375f : #8e8e93, text_size=size.small, text_halign=text.align_right)
-    // Row 4: 1h Bias
-    table.cell(panel, 0, 4, "1h Bias", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
-    table.cell(panel, 1, 4, biasStr1h, text_color=biasClr1h, text_size=size.small, text_halign=text.align_right)
-    // Row 5: 15m Bias
-    table.cell(panel, 0, 5, "15m Bias", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
-    table.cell(panel, 1, 5, biasStr15, text_color=biasClr15, text_size=size.small, text_halign=text.align_right)
-    // Row 6: Entry/SL/TP (only when signal active)
-    if isLong or isShort
-        table.cell(panel, 0, 6, "Entry", text_color=#f5f5f7, text_size=size.small, text_halign=text.align_left)
-        table.cell(panel, 1, 6, str.tostring(entryPrice, "#.##"), text_color=#f5f5f7, text_size=size.small, text_halign=text.align_right)
-        table.cell(panel, 0, 7, "SL / TP1", text_color=#8e8e93, text_size=size.small, text_halign=text.align_left)
-        table.cell(panel, 1, 7, str.tostring(slPrice, "#.##") + " / " + str.tostring(tp1Price, "#.##"), text_color=#ffd60a, text_size=size.small, text_halign=text.align_right)
-    else
-        table.cell(panel, 0, 6, "", text_color=#8e8e93, text_size=size.small)
-        table.cell(panel, 1, 6, "", text_color=#8e8e93, text_size=size.small)
-        table.cell(panel, 0, 7, "", text_color=#8e8e93, text_size=size.small)
-        table.cell(panel, 1, 7, "No signal", text_color=#8e8e93, text_size=size.small, text_halign=text.align_right)
+    table.cell(histPanel, 0, 0, "  Trade History", text_color=#818cf8, text_size=size.normal, text_halign=text.align_left, bgcolor=headerBg2)
+    table.cell(histPanel, 1, 0, str.tostring(totalTrades) + " trades  ", text_color=#94a3b8, text_size=size.normal, text_halign=text.align_right, bgcolor=headerBg2)
+
+    // Row 1: Accent divider
+    accentBg2 = color.new(#818cf8, 85)
+    table.cell(histPanel, 0, 1, "", text_size=size.tiny, bgcolor=accentBg2)
+    table.cell(histPanel, 1, 1, "", text_size=size.tiny, bgcolor=accentBg2)
+
+    // Row 2: Total PnL (ticks)
+    table.cell(histPanel, 0, 2, "  Total PnL", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowA)
+    table.cell(histPanel, 1, 2, str.tostring(totalPnl, "#.#") + " ticks  ", text_color=pnlColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowA)
+
+    // Row 3: Win Rate
+    table.cell(histPanel, 0, 3, "  Win Rate", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowB)
+    table.cell(histPanel, 1, 3, str.tostring(winRate, "#.#") + "% (" + str.tostring(wins) + "W " + str.tostring(losses) + "L)  ", text_color=wrColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowB)
+
+    // Row 4: Avg Win / Avg Loss
+    table.cell(histPanel, 0, 4, "  Avg Win", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowA)
+    table.cell(histPanel, 1, 4, str.tostring(avgWin, "#.#") + " ticks  ", text_color=#34d399, text_size=size.small, text_halign=text.align_right, bgcolor=rowA)
+
+    // Row 5: Avg Loss
+    table.cell(histPanel, 0, 5, "  Avg Loss", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowB)
+    table.cell(histPanel, 1, 5, str.tostring(avgLoss, "#.#") + " ticks  ", text_color=#f87171, text_size=size.small, text_halign=text.align_right, bgcolor=rowB)
+
+    // Row 6: Profit Factor
+    table.cell(histPanel, 0, 6, "  Profit Factor", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowA)
+    pfStr = profitFactor >= 999 ? "INF" : str.tostring(profitFactor, "#.##")
+    table.cell(histPanel, 1, 6, pfStr + "  ", text_color=pfColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowA)
+
+    // Row 7: Long WR
+    table.cell(histPanel, 0, 7, "  Long WR", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowB)
+    table.cell(histPanel, 1, 7, str.tostring(longWR, "#.#") + "% (" + str.tostring(longTotal) + ")  ", text_color=longWR >= 50 ? #34d399 : #f87171, text_size=size.small, text_halign=text.align_right, bgcolor=rowB)
+
+    // Row 8: Short WR
+    table.cell(histPanel, 0, 8, "  Short WR", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowA)
+    table.cell(histPanel, 1, 8, str.tostring(shortWR, "#.#") + "% (" + str.tostring(shortTotal) + ")  ", text_color=shortWR >= 50 ? #34d399 : #f87171, text_size=size.small, text_halign=text.align_right, bgcolor=rowA)
+
+    // Row 9: Current Streak
+    streakStr = streak >= 0 ? "+" + str.tostring(streak) + "W" : str.tostring(streak) + "L"
+    table.cell(histPanel, 0, 9, "  Streak", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowB)
+    table.cell(histPanel, 1, 9, streakStr + "  ", text_color=streakColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowB)
+
+    // Row 10: Current status
+    table.cell(histPanel, 0, 10, "  Status", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowA)
+    table.cell(histPanel, 1, 10, tradeStatus + "  ", text_color=statusColor, text_size=size.small, text_halign=text.align_right, bgcolor=rowA)
+
+    // Row 11: Target type
+    tgtStr = useTP2 ? "TP2 (2x ATR)" : "TP1 (1x ATR)"
+    table.cell(histPanel, 0, 11, "  Target", text_color=#94a3b8, text_size=size.small, text_halign=text.align_left, bgcolor=rowB)
+    table.cell(histPanel, 1, 11, tgtStr + "  ", text_color=#64748b, text_size=size.small, text_halign=text.align_right, bgcolor=rowB)
 
 // --- ALERTS ---
 alertcondition(freshLong, title="PaperTrail BUY", message="PaperTrail BUY signal | Entry: {{close}}")

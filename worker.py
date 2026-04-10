@@ -21,7 +21,7 @@ _vader = SentimentIntensityAnalyzer()
 SUPABASE_URL       = os.environ["SUPABASE_URL"]
 SUPABASE_KEY       = os.environ["SUPABASE_KEY"]
 NTFY_TOPIC         = "topstepnotis"
-CHECK_INTERVAL_SEC = int(os.environ.get("CHECK_INTERVAL_SEC", "300"))  # 5 min
+CHECK_INTERVAL_SEC = int(os.environ.get("CHECK_INTERVAL_SEC", "120"))  # 2 min
 
 logging.basicConfig(
     level=logging.INFO,
@@ -787,20 +787,20 @@ def should_record(signal: dict, symbol: str) -> bool:
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
         elapsed = (now_pt() - last_time).total_seconds()
-        # Hard cooldown — never record within 20 min of last trade
-        if elapsed < 1200:
+        # Hard cooldown — never record within 10 min of last trade
+        if elapsed < 600:
             return False
-        # Direction flip cooldown — wait 45 min before reversing
-        if elapsed < 2700 and last.get("direction") != signal["direction"]:
+        # Direction flip cooldown — wait 20 min before reversing
+        if elapsed < 1200 and last.get("direction") != signal["direction"]:
             log.info(f"[cooldown] {symbol} direction flip blocked — only {elapsed/60:.0f}m since last trade")
             return False
-        # Same direction + similar score within 60 min = duplicate
-        if elapsed < 3600:
+        # Same direction + similar score within 30 min = duplicate
+        if elapsed < 1800:
             if (last.get("direction") == signal["direction"] and
                 abs(last.get("score", 0) - signal.get("score", 0)) < 1.0):
                 return False
-        # Same entry price within 2 hours = stale repeat
-        if elapsed < 7200:
+        # Same entry price within 1 hour = stale repeat
+        if elapsed < 3600:
             tick = TICK_INFO.get(symbol, {}).get("tick", 0.10)
             if abs(float(last.get("entry", 0)) - float(signal.get("entry", 0))) / tick < 15:
                 log.info(f"[cooldown] {symbol} similar entry blocked — {elapsed/60:.0f}m, entry diff < 15 ticks")
@@ -820,8 +820,8 @@ def should_record(signal: dict, symbol: str) -> bool:
                 if last_loss_time.tzinfo is None:
                     last_loss_time = last_loss_time.replace(tzinfo=PT)
                 since_last = (now_pt() - last_loss_time).total_seconds()
-                if since_last < 7200:  # 2 hours
-                    log.warning(f"[loss-breaker] {symbol} 2 consecutive {signal['direction']} losses — blocking for {(7200-since_last)/60:.0f} more min")
+                if since_last < 3600:  # 1 hour
+                    log.warning(f"[loss-breaker] {symbol} 2 consecutive {signal['direction']} losses — blocking for {(3600-since_last)/60:.0f} more min")
                     return False
             except Exception:
                 pass

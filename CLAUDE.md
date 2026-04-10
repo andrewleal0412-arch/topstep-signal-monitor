@@ -58,7 +58,7 @@ A trading signal monitor for TopStep futures trading. Monitors **MGC=F (Micro Go
 ACTIVE_SYMBOLS = {"MGC=F"}
 _MIN_SCORE = {"MGC=F": 3.0}
 _MAX_ENTRY_STALENESS_TICKS = {"MGC=F": 15}  # 15 × $0.10 = 1.5 pts
-CHECK_INTERVAL_SEC = 300  # 5 min
+CHECK_INTERVAL_SEC = 120  # 2 min
 NTFY_TOPIC = "topstepnotis"
 ```
 
@@ -76,11 +76,11 @@ NTFY_TOPIC = "topstepnotis"
 3. New signal → `should_record()` cooldown check → `_verify_and_correct_signal()` → save to Supabase
 
 ### Cooldowns (`should_record()`)
-- Hard cooldown: 20 min
-- Direction flip: 45 min
-- Same direction: 60 min
-- Stale entry: 2hr or 15 ticks
-- **Consecutive loss breaker:** 2 same-direction losses → block that direction 2 hours
+- Hard cooldown: 10 min
+- Direction flip: 20 min
+- Same direction: 30 min
+- Stale entry: 1hr or 15 ticks
+- **Consecutive loss breaker:** 2 same-direction losses → block that direction 1 hour
 
 ### Session Gate (`trading_session_active()`)
 - Weekends: PAUSED
