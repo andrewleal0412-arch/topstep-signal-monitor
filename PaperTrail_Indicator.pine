@@ -10,8 +10,8 @@ showEMAs = input.bool(true, "Show EMAs on chart", group=grp_ema)
 
 grp_sig = "Signal Settings"
 minScore = input.float(2.5, "Minimum score to trigger signal", step=0.5, group=grp_sig)
-slMult = input.float(1.5, "SL multiplier (x ATR)", step=0.1, minval=1.0, maxval=2.5, group=grp_sig)
-tpMult = input.float(1.0, "TP1 multiplier (x ATR)", step=0.1, minval=0.5, maxval=2.5, group=grp_sig)
+slMult = input.float(1.2, "SL multiplier (x ATR)", step=0.1, minval=0.8, maxval=2.0, group=grp_sig)
+tpMult = input.float(1.5, "TP1 multiplier (x ATR)", step=0.1, minval=0.5, maxval=2.5, group=grp_sig)
 atrLen = input.int(14, "ATR Length", group=grp_sig)
 
 grp_sr = "Support & Resistance"
@@ -56,7 +56,7 @@ ema50_1 = ema50[1]
 ema9_2 = ema9[2]
 ema21_2 = ema21[2]
 
-score += ema9_1 > ema21_1 and ema21_1 > ema50_1 ? 2.0 : ema9_1 < ema21_1 and ema21_1 < ema50_1 ? -2.0 : ema9_1 > ema21_1 ? 1.0 : -1.0
+score += ema9_1 > ema21_1 and ema21_1 > ema50_1 ? 1.5 : ema9_1 < ema21_1 and ema21_1 < ema50_1 ? -1.5 : ema9_1 > ema21_1 ? 1.0 : -1.0
 score += ema9_2 <= ema21_2 and ema9_1 > ema21_1 ? 1.0 : ema9_2 >= ema21_2 and ema9_1 < ema21_1 ? -1.0 : 0.0
 
 rsi_1 = rsiVal[1]
@@ -70,6 +70,10 @@ score += macd_1 > sig_1 and hist_1 > hist_2 ? 1.0 : macd_1 < sig_1 and hist_1 < 
 
 score += close[1] > vwapVal[1] ? 0.5 : -0.5
 score += close[1] < bbLower[1] ? 0.5 : close[1] > bbUpper[1] ? -0.5 : 0.0
+
+// --- MOMENTUM (Rate of Change) — catches moves early before EMAs confirm ---
+roc5 = (close[1] - close[6]) / close[6] * 100
+score += roc5 > 0.3 ? 1.0 : roc5 < -0.3 ? -1.0 : roc5 > 0.15 ? 0.5 : roc5 < -0.15 ? -0.5 : 0.0
 
 // --- HTF BIAS 15m ---
 ema9_15m = request.security(syminfo.tickerid, "15", ta.ema(close, ema9Len))
@@ -203,7 +207,7 @@ float slPrice = isLong ? entryPrice - slMult * atrVal[1] : isShort ? entryPrice 
 float tp1Price = isLong ? entryPrice + tpMult * atrVal[1] : isShort ? entryPrice - tpMult * atrVal[1] : na
 float tp2Price = isLong ? entryPrice + tpMult * 2 * atrVal[1] : isShort ? entryPrice - tpMult * 2 * atrVal[1] : na
 
-float strength = math.min(math.abs(score) / 14.0 * 100, 99)
+float strength = math.min(math.abs(score) / 15.0 * 100, 99)
 
 // --- SIGNAL ARROWS (clean, only on fresh signals) ---
 float prevScore = score[1]

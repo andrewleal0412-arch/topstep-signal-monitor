@@ -154,7 +154,7 @@ def send_notification(symbol: str, trade: dict):
 
     ti       = TICK_INFO[symbol]
     d        = trade["direction"]
-    strength = min(int(abs(trade["score"]) / 14.0 * 100), 99)
+    strength = min(int(abs(trade["score"]) / 15.0 * 100), 99)
     sl_ticks = abs(trade["entry"] - trade["sl"]) / ti["tick"]
     tp1_ticks= abs(trade["entry"] - trade["tp1"]) / ti["tick"]
 
@@ -549,8 +549,8 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     reasons: list[str] = []
 
     # EMA stack
-    if   last["EMA9"] > last["EMA21"] > last["EMA50"]: score += 2;  reasons.append("EMA bull stack +2")
-    elif last["EMA9"] < last["EMA21"] < last["EMA50"]: score -= 2;  reasons.append("EMA bear stack -2")
+    if   last["EMA9"] > last["EMA21"] > last["EMA50"]: score += 1.5;  reasons.append("EMA bull stack +1.5")
+    elif last["EMA9"] < last["EMA21"] < last["EMA50"]: score -= 1.5;  reasons.append("EMA bear stack -1.5")
     elif last["EMA9"] > last["EMA21"]:                  score += 1;  reasons.append("EMA9>21 +1")
     else:                                               score -= 1;  reasons.append("EMA9<21 -1")
 
@@ -576,6 +576,14 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     # Bollinger
     if   float(last["Close"]) < float(last["BB_lower"]): score += 0.5; reasons.append("below BB lower +0.5")
     elif float(last["Close"]) > float(last["BB_upper"]): score -= 0.5; reasons.append("above BB upper -0.5")
+
+    # Momentum (Rate of Change) — catches moves early before EMAs confirm
+    if len(df) >= 8:
+        roc5 = (float(last["Close"]) - float(df["Close"].iloc[-7])) / float(df["Close"].iloc[-7]) * 100
+        if   roc5 > 0.3:  score += 1.0; reasons.append(f"strong momentum up {roc5:.2f}% +1.0")
+        elif roc5 < -0.3: score -= 1.0; reasons.append(f"strong momentum down {roc5:.2f}% -1.0")
+        elif roc5 > 0.15: score += 0.5; reasons.append(f"momentum up {roc5:.2f}% +0.5")
+        elif roc5 < -0.15: score -= 0.5; reasons.append(f"momentum down {roc5:.2f}% -0.5")
 
     # News
     ns_adj = ns.get("adjustment", 0)
@@ -672,20 +680,22 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
     price = float(last["Close"])
     tick  = TICK_INFO.get(symbol, {}).get("tick", 0.25)
 
-    # Adaptive SL multiplier from config
-    sl_mult = float(load_config().get("sl_multipliers", {}).get(symbol, 1.5))
-    sl_mult = max(1.0, min(2.5, sl_mult))
+    # Adaptive SL/TP multipliers from config
+    sl_mult = float(load_config().get("sl_multipliers", {}).get(symbol, 1.2))
+    sl_mult = max(0.8, min(2.0, sl_mult))
+    tp_mult = float(load_config().get("tp_multipliers", {}).get(symbol, 1.5))
+    tp_mult = max(0.5, min(2.5, tp_mult))
 
     if direction == "LONG":
         entry = _snap(price, tick)
         sl    = _snap(price - sl_mult * atr, tick)
-        tp1   = _snap(price + sl_mult * atr, tick)
-        tp2   = _snap(price + sl_mult * 2 * atr, tick)
+        tp1   = _snap(price + tp_mult * atr, tick)
+        tp2   = _snap(price + tp_mult * 2 * atr, tick)
     else:
         entry = _snap(price, tick)
         sl    = _snap(price + sl_mult * atr, tick)
-        tp1   = _snap(price - sl_mult * atr, tick)
-        tp2   = _snap(price - sl_mult * 2 * atr, tick)
+        tp1   = _snap(price - tp_mult * atr, tick)
+        tp2   = _snap(price - tp_mult * 2 * atr, tick)
 
     return {"direction": direction, "score": score, "entry": entry,
             "sl": sl, "tp1": tp1, "tp2": tp2, "atr": atr, "reasons": reasons, "fvg": fvg}
@@ -890,21 +900,23 @@ def _verify_and_correct_signal(signal: dict, symbol: str) -> dict | None:
     if atr < tick:
         atr = tick * 10  # safety floor
 
-    sl_mult = float(load_config().get("sl_multipliers", {}).get(symbol, 1.5))
-    sl_mult = max(1.0, min(2.5, sl_mult))
+    sl_mult = float(load_config().get("sl_multipliers", {}).get(symbol, 1.2))
+    sl_mult = max(0.8, min(2.0, sl_mult))
+    tp_mult = float(load_config().get("tp_multipliers", {}).get(symbol, 1.5))
+    tp_mult = max(0.5, min(2.5, tp_mult))
 
     if signal["direction"] == "LONG":
         sl  = _snap(entry - sl_mult * atr, tick)
-        tp1 = _snap(entry + sl_mult * atr, tick)
-        tp2 = _snap(entry + sl_mult * 2 * atr, tick)
+        tp1 = _snap(entry + tp_mult * atr, tick)
+        tp2 = _snap(entry + tp_mult * 2 * atr, tick)
         # Sanity: SL must be below entry, TPs above
         if sl >= entry or tp1 <= entry:
             log.warning(f"[verify] {symbol} LONG failed sanity — sl={sl} entry={entry} tp1={tp1}")
             return None
     else:
         sl  = _snap(entry + sl_mult * atr, tick)
-        tp1 = _snap(entry - sl_mult * atr, tick)
-        tp2 = _snap(entry - sl_mult * 2 * atr, tick)
+        tp1 = _snap(entry - tp_mult * atr, tick)
+        tp2 = _snap(entry - tp_mult * 2 * atr, tick)
         if sl <= entry or tp1 >= entry:
             log.warning(f"[verify] {symbol} SHORT failed sanity — sl={sl} entry={entry} tp1={tp1}")
             return None

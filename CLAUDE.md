@@ -33,23 +33,24 @@ A trading signal monitor for TopStep futures trading. Monitors **MGC=F (Micro Go
 
 ---
 
-## Signal Scoring Engine (Max Score: 14.0)
+## Signal Scoring Engine (Max Score: 15.0)
 
 | Component | Points | Notes |
 |-----------|--------|-------|
-| EMA stack (9/21/50) | ±2.0 | Full bull/bear stack |
+| EMA stack (9/21/50) | ±1.5 | Full bull/bear stack (reduced from ±2.0 to fire earlier) |
 | EMA crossover | ±1.0 | Fresh 9/21 cross |
 | RSI | ±1.0 | <35 bull, >65 bear |
 | MACD | ±1.0 | Line vs signal + histogram |
 | VWAP | ±0.5 | Price above/below |
 | Bollinger Bands | ±0.5 | Outside bands |
+| Momentum (ROC) | ±1.0 | 5-bar rate of change — leading indicator |
 | 15m HTF bias | ±1.0–1.5 | Confirming or contrarian |
 | 1h HTF bias | ±1.5–2.0 | Confirming or contrarian |
 | Candlestick patterns | ±0.5–1.0 | Engulfing, hammer, star, pin bar |
 | Support/Resistance | ±1.0 | At level = +1, blocked = -0.75 |
 | FVG (Fair Value Gap) | ±1.5 | Price inside FVG zone |
 
-**Strength = abs(score) / 14.0 × 100%**
+**Strength = abs(score) / 15.0 × 100%**
 
 ---
 
