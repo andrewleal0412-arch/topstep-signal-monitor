@@ -1731,9 +1731,19 @@ def render_instrument(symbol: str, interval: str, period: str):
     ti = TICK_INFO[symbol]
     name = ti["name"]
 
-    df = fetch_data(symbol, interval, period)
-    if df.empty:
-        sess_active, sess_reason, sess_next = trading_session_active(symbol)
+    # ── Session status banner (always show at top) ────────────────────────────
+    sess_active, sess_reason, sess_next = trading_session_active(symbol)
+    if sess_active:
+        st.markdown("""
+<div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
+     border-radius:10px;padding:9px 16px;margin-bottom:12px;
+     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
+  <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
+       box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
+  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE</span>
+  <span style="font-size:12px;color:#64748b">— Bot is monitoring MGC for signals</span>
+</div>""", unsafe_allow_html=True)
+    else:
         next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
         st.markdown(f"""
 <div style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.18);
@@ -1743,6 +1753,9 @@ def render_instrument(symbol: str, interval: str, period: str):
   <span style="font-size:12px;font-weight:600;color:#fbbf24">SIGNALS PAUSED</span>
   <span style="font-size:12px;color:#64748b">— {sess_reason}{next_str}</span>
 </div>""", unsafe_allow_html=True)
+
+    df = fetch_data(symbol, interval, period)
+    if df.empty:
         return
 
     df = compute_indicators(df)
@@ -1802,29 +1815,6 @@ def render_instrument(symbol: str, interval: str, period: str):
   </div>
 </div>
 """, unsafe_allow_html=True)
-
-    # ── Session status banner ────────────────────────────────────────────────
-    sess_active, sess_reason, sess_next = trading_session_active(symbol)
-    if sess_active:
-        st.markdown("""
-<div style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);
-     border-radius:10px;padding:9px 16px;margin-bottom:12px;
-     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
-  <span style="width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
-       box-shadow:0 0 6px rgba(52,211,153,0.6)"></span>
-  <span style="font-size:12px;font-weight:600;color:#34d399">ACTIVE</span>
-  <span style="font-size:12px;color:#64748b">— Bot is monitoring MGC for signals</span>
-</div>""", unsafe_allow_html=True)
-    else:
-        next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
-        st.markdown(f"""
-<div style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.18);
-     border-radius:10px;padding:9px 16px;margin-bottom:12px;
-     display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
-  <span style="width:8px;height:8px;border-radius:50%;background:#fbbf24;flex-shrink:0"></span>
-  <span style="font-size:12px;font-weight:600;color:#fbbf24">SIGNALS PAUSED</span>
-  <span style="font-size:12px;color:#64748b">— {sess_reason}{next_str}</span>
-</div>""", unsafe_allow_html=True)
 
     # ── Resolve open trade early so banner + levels both pin to logged values ──
     all_trades = load_trades()
