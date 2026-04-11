@@ -263,6 +263,7 @@ if tradeState != 0
         array.push(histExit, tradeTP)
         array.push(histBarIn, tradeBar)
         array.push(histBarOut, bar_index)
+        label.new(bar_index, high + atrVal * 0.3, "W", color=color.new(#30d158, 20), textcolor=#ffffff, size=size.tiny, style=label.style_label_down)
         tradeState := 0
         line.delete(entryLine)
         line.delete(slLine)
@@ -281,6 +282,7 @@ if tradeState != 0
         array.push(histExit, tradeSL)
         array.push(histBarIn, tradeBar)
         array.push(histBarOut, bar_index)
+        label.new(bar_index, low - atrVal * 0.3, "L", color=color.new(#ff375f, 20), textcolor=#ffffff, size=size.tiny, style=label.style_label_up)
         tradeState := 0
         line.delete(entryLine)
         line.delete(slLine)
@@ -303,7 +305,11 @@ if freshLong or freshShort
         array.push(histEntry, tradeEntry)
         array.push(histExit, exitP)
         array.push(histBarIn, tradeBar)
-        array.push(histBarOut, bar_index)
+        array.push(histBarOut, bar_index - 1)
+        if pnl > 0
+            label.new(bar_index - 1, high[1] + atrVal * 0.3, "W", color=color.new(#30d158, 20), textcolor=#ffffff, size=size.tiny, style=label.style_label_down)
+        else
+            label.new(bar_index - 1, low[1] - atrVal * 0.3, "L", color=color.new(#ff375f, 20), textcolor=#ffffff, size=size.tiny, style=label.style_label_up)
     tradeState := freshLong ? 1 : -1
     tradeEntry := entryPrice
     tradeSL := slPrice
@@ -320,17 +326,6 @@ if array.size(histPnl) > maxHistory
     array.shift(histBarIn)
     array.shift(histBarOut)
 
-// Win/loss markers on chart
-int hSize = array.size(histOutcome)
-if hSize > 0 and array.size(histBarOut) > 0
-    int lastBar = array.get(histBarOut, hSize - 1)
-    if lastBar == bar_index
-        int lastOutcome = array.get(histOutcome, hSize - 1)
-        float lastExit = array.get(histExit, hSize - 1)
-        if lastOutcome == 1
-            label.new(bar_index, lastExit, "W", color=color.new(#30d158, 20), textcolor=#ffffff, size=size.tiny, style=label.style_circle)
-        else
-            label.new(bar_index, lastExit, "L", color=color.new(#ff375f, 20), textcolor=#ffffff, size=size.tiny, style=label.style_circle)
 
 // --- ENTRY/TP/SL LINES (draw on fresh signal) ---
 if freshLong or freshShort
