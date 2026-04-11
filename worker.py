@@ -41,7 +41,7 @@ ACTIVE_SYMBOLS = {"MGC=F"}
 
 # Minimum score to record a signal per symbol (tuned from trade log)
 _MIN_SCORE = {
-    "MGC=F": 3.0,
+    "MGC=F": 2.0,
 }
 
 # Max ticks the signal entry can differ from the live 1m price before rejecting
@@ -674,8 +674,8 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
                 score += 1.0; reasons.append(f"exhausted down-move {abs(move_atr):.1f}x ATR +1.0")
         score = round(score, 2)
 
-    if   score >= 2.5: direction = "LONG"
-    elif score <= -2.5: direction = "SHORT"
+    if   score >= 2.0: direction = "LONG"
+    elif score <= -2.0: direction = "SHORT"
     else: return {**empty, "score": score, "fvg": fvg}
     price = float(last["Close"])
     tick  = TICK_INFO.get(symbol, {}).get("tick", 0.25)
@@ -842,18 +842,18 @@ def should_record(signal: dict, symbol: str) -> bool:
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=PT)
         elapsed = (now_pt() - last_time).total_seconds()
-        # Hard cooldown — never record within 10 min of last trade
-        if elapsed < 600:
+        # Hard cooldown — never record within 5 min of last trade
+        if elapsed < 300:
             return False
-        # Direction flip cooldown — wait 20 min before reversing
-        if elapsed < 1200 and last.get("direction") != signal["direction"]:
+        # Direction flip cooldown — wait 10 min before reversing
+        if elapsed < 600 and last.get("direction") != signal["direction"]:
             log.info(f"[cooldown] {symbol} direction flip blocked — only {elapsed/60:.0f}m since last trade")
             return False
-        # Same direction within 30 min = duplicate (regardless of score)
-        if elapsed < 1800 and last.get("direction") == signal["direction"]:
+        # Same direction within 15 min = duplicate (regardless of score)
+        if elapsed < 900 and last.get("direction") == signal["direction"]:
             return False
-        # Same direction within 45 min after a loss — re-entering too soon
-        if elapsed < 2700 and last.get("direction") == signal["direction"]:
+        # Same direction within 20 min after a loss — re-entering too soon
+        if elapsed < 1200 and last.get("direction") == signal["direction"]:
             if last.get("status") == "loss":
                 log.info(f"[cooldown] {symbol} same-dir re-entry after loss blocked — only {elapsed/60:.0f}m elapsed")
                 return False
