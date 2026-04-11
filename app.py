@@ -1755,6 +1755,12 @@ def render_instrument(symbol: str, interval: str, period: str):
 </div>""", unsafe_allow_html=True)
 
     df = fetch_data(symbol, interval, period)
+    # When market is closed, primary fetch may return empty — try fallbacks
+    if df.empty and not sess_active:
+        for fb_interval, fb_period in [("5m", "60d"), ("15m", "60d"), ("1h", "730d")]:
+            df = fetch_data(symbol, fb_interval, fb_period)
+            if not df.empty:
+                break
     if df.empty:
         return
 
