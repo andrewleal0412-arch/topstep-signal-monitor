@@ -1733,11 +1733,9 @@ def render_instrument(symbol: str, interval: str, period: str):
 
     df = fetch_data(symbol, interval, period)
     if df.empty:
-        # Show session banner even when no data
         sess_active, sess_reason, sess_next = trading_session_active(symbol)
-        if not sess_active:
-            next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
-            st.markdown(f"""
+        next_str = f" &nbsp;·&nbsp; Next window: <b style='color:#94a3b8'>{sess_next}</b>" if sess_next else ""
+        st.markdown(f"""
 <div style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.18);
      border-radius:10px;padding:9px 16px;margin-bottom:12px;
      display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif">
@@ -1745,25 +1743,6 @@ def render_instrument(symbol: str, interval: str, period: str):
   <span style="font-size:12px;font-weight:600;color:#fbbf24">SIGNALS PAUSED</span>
   <span style="font-size:12px;color:#64748b">— {sess_reason}{next_str}</span>
 </div>""", unsafe_allow_html=True)
-        st.info(f"No live data for {name}. Market is closed — signals resume when it reopens.")
-
-        # Show recent trade stats even when market is closed
-        all_trades = load_trades()
-        sym_trades = [t for t in all_trades if t["symbol"] == symbol and t.get("status") != "open"]
-        if sym_trades:
-            last_10 = sym_trades[-10:]
-            wins = len([t for t in last_10 if t.get("status", "").startswith("win")])
-            losses = len([t for t in last_10 if t.get("status") == "loss"])
-            st.markdown(f"""
-<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
-     border-radius:10px;padding:16px 18px;margin-top:8px">
-  <div style="font-size:13px;font-weight:600;color:#ebebf5;margin-bottom:8px">Recent Performance (last 10)</div>
-  <div style="font-size:12px;color:#8e8e93">
-    <span style="color:#30d158">✓ {wins}W</span> &nbsp;/&nbsp;
-    <span style="color:#ff375f">✗ {losses}L</span> &nbsp;·&nbsp;
-    Win rate: <b style="color:#ebebf5">{wins/(wins+losses)*100:.0f}%</b>
-  </div>
-</div>""", unsafe_allow_html=True) if (wins + losses) > 0 else None
         return
 
     df = compute_indicators(df)
