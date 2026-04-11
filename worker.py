@@ -981,6 +981,30 @@ def _has_open_trade(symbol: str) -> bool:
     trades = load_trades()
     return any(t["status"] == "open" and t["symbol"] == symbol for t in trades)
 
+def _close_trade_at_market(trade: dict, symbol: str):
+    """Auto-close an open trade at the last available market price (market closed)."""
+    try:
+        df_1m = fetch_data(symbol, "1m", "7d")
+        if df_1m.empty:
+            return
+        last_price = float(df_1m["Close"].iloc[-1])
+        ti_sz = TICK_INFO[symbol]["tick"]
+        d = trade["direction"]
+        if d == "LONG":
+            pnl = round((last_price - trade["entry"]) / ti_sz, 1)
+        else:
+            pnl = round((trade["entry"] - last_price) / ti_sz, 1)
+        status = "win_tp1" if pnl > 0 else "loss"
+        trade.update(
+            status=status,
+            pnl_ticks=pnl,
+            closed_at=now_pt().isoformat(),
+        )
+        save_single_trade(trade)
+        log.info(f"Auto-closed {d} {symbol} at market close → {status} ({pnl:+.1f} ticks) @ {last_price:,.2f}")
+    except Exception as e:
+        log.error(f"_close_trade_at_market: {e}")
+
 def run_once():
     log.info("── tick ──")
 
@@ -989,6 +1013,12 @@ def run_once():
     active, reason, reopens = trading_session_active("MGC=F")
     if not active:
         log.info(f"PAUSED — {reason} (reopens {reopens})")
+        # Auto-close any open trades — don't carry positions through market close
+        for symbol in ACTIVE_SYMBOLS:
+            trades = load_trades()
+            open_trades = [t for t in trades if t["status"] == "open" and t["symbol"] == symbol]
+            for trade in open_trades:
+                _close_trade_at_market(trade, symbol)
         return
 
     articles = fetch_news()
