@@ -13,6 +13,7 @@ import json
 import uuid
 import os
 import hashlib
+import logging
 import requests
 import feedparser
 import re
@@ -1093,11 +1094,15 @@ def _fetch_raw(symbol: str, interval: str, period: str) -> pd.DataFrame:
         return df
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+        if df.empty and interval in ("1m", "2m", "5m"):
+            # Intraday periods may be restricted — try shorter period
+            df = yf.download(symbol, period="5d", interval=interval, progress=False, auto_adjust=True)
         if df.empty:
             return pd.DataFrame()
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
         return df.dropna()
-    except Exception:
+    except Exception as e:
+        logging.warning(f"yfinance fetch failed ({symbol}, {interval}, {period}): {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -1757,11 +1762,12 @@ def render_instrument(symbol: str, interval: str, period: str):
     df = fetch_data(symbol, interval, period)
     # When market is closed, primary fetch may return empty — try fallbacks
     if df.empty and not sess_active:
-        for fb_interval, fb_period in [("5m", "60d"), ("15m", "60d"), ("1h", "730d")]:
+        for fb_interval, fb_period in [("5m", "60d"), ("15m", "60d"), ("1h", "730d"), ("1d", "60d")]:
             df = fetch_data(symbol, fb_interval, fb_period)
             if not df.empty:
                 break
     if df.empty:
+        st.warning("Could not load market data. Try refreshing the page.")
         return
 
     df = compute_indicators(df)
