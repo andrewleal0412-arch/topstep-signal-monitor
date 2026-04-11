@@ -198,9 +198,20 @@ score += inBullFVG ? 1.5 : inBearFVG ? -1.5 : 0.0
 // --- FINAL SCORE & DIRECTION ---
 score := math.round(score * 100) / 100
 
-bool isLong = score >= minScore
-bool isShort = score <= -minScore
-string direction = isLong ? "LONG" : isShort ? "SHORT" : "NEUTRAL"
+// --- SESSION GATE ---
+// MGC: Sun 3:00 PM PT – Fri 2:00 PM PT, with daily 2:00–3:00 PM PT maintenance
+// dayofweek: 1=Sun 2=Mon 3=Tue 4=Wed 5=Thu 6=Fri 7=Sat
+int dow = dayofweek
+float hh = hour + minute / 60.0  // chart time (use exchange/PT timezone)
+bool isSaturday = dow == 7
+bool isSundayPreOpen = dow == 1 and hh < 15.0
+bool isFridayClose = dow == 6 and hh >= 14.0
+bool isDailyMaint = not (dow == 6 or dow == 7 or dow == 1) and hh >= 14.0 and hh < 15.0
+bool marketOpen = not isSaturday and not isSundayPreOpen and not isFridayClose and not isDailyMaint
+
+bool isLong = score >= minScore and marketOpen
+bool isShort = score <= -minScore and marketOpen
+string direction = isLong ? "LONG" : isShort ? "SHORT" : marketOpen ? "NEUTRAL" : "CLOSED"
 
 float entryPrice = close[1]
 float slPrice = isLong ? entryPrice - slMult * atrVal[1] : isShort ? entryPrice + slMult * atrVal[1] : na
@@ -362,7 +373,7 @@ if showTable and barstate.islast
     // Dark navy base with subtle border — matches website card style
     var table panel = table.new(tblPosition, 2, 10, bgcolor=color.new(#0f1520, 0), frame_color=color.new(#1e293b, 30), frame_width=1, border_color=color.new(#1e293b, 70), border_width=1)
 
-    dirColor = isLong ? #34d399 : isShort ? #f87171 : #64748b
+    dirColor = isLong ? #34d399 : isShort ? #f87171 : not marketOpen ? #f59e0b : #64748b
     biasStr15 = bias15m == 1 ? "BULL" : bias15m == -1 ? "BEAR" : "NEU"
     biasStr1h = bias1h == 1 ? "BULL" : bias1h == -1 ? "BEAR" : "NEU"
     biasClr15 = bias15m == 1 ? #34d399 : bias15m == -1 ? #f87171 : #64748b

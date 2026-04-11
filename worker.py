@@ -703,27 +703,40 @@ def generate_signal(df: pd.DataFrame, symbol: str, ns: dict, htf_bias_15m: int =
 # ─── Session Gate ─────────────────────────────────────────────────────────────
 def trading_session_active(symbol: str) -> tuple:
     """
-    MGC trades nearly 24h Sun-Fri, with two blackout windows:
-      - Daily maintenance: 2:00 PM – 3:00 PM PT (5-6 PM ET) every weekday
-      - Weekend: Saturday all day + Sunday before 3:00 PM PT
-    During blackouts the bot must NOT generate signals or check TP/SL,
-    because yfinance returns stale pre-close data that causes false closes.
+    MGC (Micro Gold) CME trading hours:
+      - Open:  Sunday 6:00 PM ET  (3:00 PM PT)
+      - Close: Friday  5:00 PM ET  (2:00 PM PT) — weekend begins
+      - Daily maintenance: 5:00–6:00 PM ET (2:00–3:00 PM PT) Mon–Thu only
+      - Saturday: fully closed
+      - Sunday: closed until 3:00 PM PT
+
+    weekday: 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun
     """
     now     = now_pt()
     weekday = now.weekday()
     h       = now.hour + now.minute / 60.0
-    # Weekend
+
+    # Saturday — fully closed
     if weekday == 5:
         return False, "Market closed — Saturday", "3:00 PM PT Sunday"
+
+    # Sunday — closed until 3:00 PM PT (6:00 PM ET reopening)
     if weekday == 6 and h < 15.0:
         return False, "Market closed — Sunday pre-open", "3:00 PM PT"
-    # Daily maintenance window: 2:00 PM – 3:00 PM PT (CME 5-6 PM ET)
+
+    # Friday — closes at 2:00 PM PT (5:00 PM ET) for the weekend
+    if weekday == 4 and h >= 14.0:
+        return False, "Market closed — weekend", "3:00 PM PT Sunday"
+
+    # Mon–Thu daily maintenance: 2:00–3:00 PM PT (5–6 PM ET)
     if 14.0 <= h < 15.0:
         return False, "Daily maintenance — market closed", "3:00 PM PT"
-    # Buffer after reopen: skip first 5 min so fresh candles populate
-    if 15.0 <= h < 15.083:  # 3:00 - 3:05 PM PT
+
+    # Buffer after maintenance reopen: skip first 5 min for fresh candles
+    if 15.0 <= h < 15.083:  # 3:00–3:05 PM PT
         return False, "Market reopening — waiting for fresh data", "3:05 PM PT"
-    return True, "Gold futures active 24h", ""
+
+    return True, "Gold futures active", ""
 
 # ─── TP/SL Checker ────────────────────────────────────────────────────────────
 def check_open_trades(symbol: str, df: pd.DataFrame):
