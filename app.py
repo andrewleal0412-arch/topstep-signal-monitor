@@ -2014,7 +2014,10 @@ def render_instrument(symbol: str, interval: str, period: str):
 def render_news_tab():
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    with st.spinner("Loading latest news..."):
+    try:
+        with st.spinner("Loading latest news..."):
+            articles = fetch_news()
+    except RuntimeError:
         articles = fetch_news()
 
     if not articles:
