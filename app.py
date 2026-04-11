@@ -733,6 +733,9 @@ def trading_session_active(symbol: str) -> tuple:
         return False, "Market closed — Saturday", "3:00 PM PT Sunday"
     if weekday == 6 and h < 15.0:
         return False, "Market closed — Sunday pre-open", "3:00 PM PT"
+    # Friday — closes at 2:00 PM PT (5:00 PM ET) for the weekend
+    if weekday == 4 and h >= 14.0:
+        return False, "Market closed — weekend", "3:00 PM PT Sunday"
     if 14.0 <= h < 15.0:
         return False, "Daily maintenance — market closed", "3:00 PM PT"
     if 15.0 <= h < 15.083:
